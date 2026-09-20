@@ -219,6 +219,70 @@ interrupted: restoring Auto
 With Vent running there is a second client, so the fan keeps the mode after a bare `fan-set` as well - until the app writes its own stored mode back, which it does within seconds.
 The Fans tab is the place to set a mode that should last.
 
+## Windows
+
+Vent tiles the window that was in front: halves, corners, thirds, two thirds, maximize, almost maximize, maximize height, center, restore, larger, smaller and the move to the next or the previous display.
+The Windows tab and the Windows section of the popover draw the same grid of miniature screens; a click moves the window, and from the popover the app you were in comes back to the front.
+Pressing the same tile again walks a ladder, the way Rectangle does: a half becomes two thirds, then one third, then the half again, and the thirds walk first, center, last.
+The ladder starts over after two seconds or as soon as you move the window yourself.
+
+**Gap** (0 to 40 pt) is the space between two tiled windows and between a window and the screen edge.
+Two neighbours are exactly one gap apart, whatever the rounding, and the tiles in the grid show the gap you chose.
+
+### The two shortcut sets
+
+| Set | Tiles | Extras |
+|-----|-------|--------|
+| Rectangle layout | ⌃⌥ + key | ⌃⌥⌘ + key |
+| Alternate layout | ⌃⌥⇧ + key | ⌃⌥⇧⌘ + key |
+
+The keys are Rectangle's: arrows for the halves, U I J K for the corners, D F G for the thirds, E and T for the two thirds, C to center, ↩ to maximize, ⌫ to restore, - and = to resize, ↑ for maximize height and ⌃⌥⌘ arrows for the displays.
+**Shortcuts start off.** You pick a set in the Windows tab, and every action has a switch of its own next to its chord.
+
+### When another window manager runs
+
+Vent looks for Rectangle, Hookshot, Magnet, Moom and BetterSnapTool by bundle identifier and names the one it finds, with its version, in a banner: use Vent's alternate set, quit that app, or keep Vent's shortcuts off.
+Quitting only ever happens on that click, and it is an ordinary quit, the same as Command-Q.
+
+Measured on macOS 26: `RegisterEventHotKey` answers `eventHotKeyExistsErr` only for a chord the **same process** already holds.
+Two apps may claim one chord, both are told "registered", and both then answer the key.
+So the per-binding dot in the shortcut table is green for a chord this build really claimed, orange while a known window manager is running on Rectangle's own layout (both apps may answer), grey when the action is off, and red when macOS refused the chord outright.
+
+### Permissions
+
+Moving another app's window needs **Accessibility**, the same grant the keyboard lock uses.
+Without it the tab and the popover section show one row with a Grant button and nothing else.
+The grant is bound to the code identity of the bundle, so a Vent built somewhere else than `/Applications/Vent.app` inherits it only while it is signed the same way.
+
+### What is refused, and why
+
+| Refusal | What you see |
+|---------|--------------|
+| Full screen | "This window is in full screen. Leave full screen first." |
+| Minimized | "This window is in the Dock. Open it first." |
+| Not a standard window | A panel, a popover or a status window cannot be tiled. |
+| Not movable | The app nailed its window down: the position or the size is not settable. |
+| No window | Nothing was in front, or the app has no window at all. |
+
+An app with a minimum size (a terminal, most editors) is not refused: it keeps the size it insists on, and Vent pins it flush against the edges the layout asked for.
+Some apps report their window in a space of their own while `AXEnhancedUserInterface` is set; Vent switches that flag off around the write and back on afterwards, never while VoiceOver is running, and the Windows tab has a switch for it.
+
+### The self test
+
+```sh
+make window-selftest
+```
+
+It builds `VentAXProbe`, a tiny accessory app with one almost invisible window that never takes the focus, launches it without activating it, and drives every action, both ladders, larger, smaller, restore and the minimum-size case against it.
+Each result is compared with `WindowKit`'s own answer to the point, and the table is printed and written to `build/selftest/window-selftest.txt`.
+No window of yours is ever touched: every move goes to the probe window, found by the title the run generated.
+
+```sh
+ventctl window list     # the windows of the frontmost app, read only
+```
+
+`ventctl` needs the Accessibility grant on the terminal that runs it, and says so when it is missing.
+
 ## Keyboard lock
 
 Vent can hold the whole keyboard for a moment so you can wipe it.
@@ -379,6 +443,7 @@ ventctl selftest-fans           # the live sequence, with a temperature guard
 ventctl procs                   # the merged process table
 ventctl io                      # disk throughput
 ventctl scan ~/Downloads        # the walker on one folder
+ventctl window list             # the windows of the frontmost app, read only
 ventctl helper-ping
 ventctl helper-read F0Ac
 ```
@@ -398,6 +463,9 @@ open -a Vent --args --show-window --tab sensors
   --scan-root <path>           fill the Storage table from one folder
   --overlay-preview <seconds>  draw the lock overlay and create no event tap at all
   --lock-test <seconds>        a real lock, clamped to 10 s
+  --shortcut-set <name>        off|rectangle|alternate for this run, written nowhere
+  --window-selftest <app>      drive VentAXProbe through every window action and quit
+  --window-selftest-out <dir>  where the PASS/FAIL table is written
   --fake-fans                  a real governor over fans that do not exist
   --fan-mode 0=constant:3000   what a fake fan should do; also curve:Tp01:45:85 and auto
   --window-size 760x480        exact content size, for a shot at the minimum the layout allows

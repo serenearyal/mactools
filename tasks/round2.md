@@ -70,8 +70,8 @@ Everything that touches AX, Carbon, `dlopen` or IOKit power stays in `App/`.
 - [ ] **R3 Keep Awake:** `AwakeKit`, controller, tab, popover row, header state, quit-path release, `ventctl awake`.
 - [ ] **R4 Keyboard Backlight:** `BacklightKit`, client, tab, popover row, `ventctl backlight`, Release-build gate (no library-validation entitlement).
 - [ ] **R5 Window geometry:** `WindowKit` with about 120 pure tests. No system calls.
-- [ ] **R6 AX mover + hotkeys:** `App/Windows/*`, conflict detection, `ventctl window list`, Debug-only bundled `VentAXProbe` app for integration tests (never a user window).
-- [ ] **R7 Windows UI:** shared `WindowTileGrid` for the popover and the tab, shortcut table with set picker and per-binding status, gap slider.
+- [x] **R6 AX mover + hotkeys:** `App/Windows/*`, conflict detection, `ventctl window list`, Debug-only bundled `VentAXProbe` app for integration tests (never a user window).
+- [x] **R7 Windows UI:** shared `WindowTileGrid` for the popover and the tab, shortcut table with set picker and per-binding status, gap slider.
 - [ ] **R8 Efficiency:** the measures above, `scripts/measure_idle.sh`, budgets green in Release.
 - [ ] **R9 Polish + docs:** full visual sweep of the popover and all tabs at 900x600 and 760x480, README, `tasks/todo.md` review section, correct the stale Accessibility note.
 - v2 (not in this round): drag-to-edge snapping with preview, shortcut recorder, hotkeys for backlight and keep awake.
