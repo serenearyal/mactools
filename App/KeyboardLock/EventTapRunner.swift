@@ -93,8 +93,10 @@ final class EventTapRunner: @unchecked Sendable {
             self.thread = nil
             return values
         }
-        watchdog?.cancel()
-        watchdog = nil
+        lock.withLock {
+            watchdog?.cancel()
+            watchdog = nil
+        }
 
         if let port {
             CGEvent.tapEnable(tap: port, enable: false)
@@ -214,7 +216,7 @@ final class EventTapRunner: @unchecked Sendable {
             CGEvent.tapEnable(tap: port, enable: true)
             log.error("watchdog re-enabled the tap")
         }
-        watchdog = timer
+        lock.withLock { watchdog = timer }
         timer.resume()
     }
 }

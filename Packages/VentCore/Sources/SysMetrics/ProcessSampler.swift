@@ -116,11 +116,16 @@ public enum ProcessCPUMath {
     /// Returns nil when there is nothing to compare against: no previous
     /// sample, a different start time under the same pid (the pid was reused
     /// for another process), or a non-positive interval.
+    static let minimumIntervalNanoseconds: UInt64 = 100_000_000
+
     public static func percent(previous: ProcessCPUSample?, current: ProcessCPUSample) -> Double? {
         guard let previous else { return nil }
         guard previous.startAbsoluteTime == current.startAbsoluteTime else { return nil }
         guard current.wallNanoseconds > previous.wallNanoseconds else { return nil }
         let wall = current.wallNanoseconds - previous.wallNanoseconds
+        // Two clients of one sampler can ask a few milliseconds apart, and a
+        // share of so short an interval is noise.
+        guard wall >= minimumIntervalNanoseconds else { return nil }
         // A counter that went backwards means the reading is not comparable;
         // report no CPU rather than a negative one.
         let cpu = current.cpuNanoseconds > previous.cpuNanoseconds

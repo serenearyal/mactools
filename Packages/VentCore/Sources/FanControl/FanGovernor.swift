@@ -24,6 +24,9 @@ public final class FanGovernor: Sendable {
         var interlock = ThermalInterlock()
         var fans: [FanReading] = []
         var readError: String?
+        /// Between the sleep notice and the wake: the timer still ticks, and a
+        /// tick must not force the fans again.
+        var suspended = false
     }
 
     private let hardware: any FanHardware
@@ -77,6 +80,9 @@ public final class FanGovernor: Sendable {
             state.desired = [:]
             state.smoothers = [:]
             state.sensorCelsius = [:]
+            // No wish is left to hold back, and the wake path only reapplies
+            // when there is one, so nothing else would clear this.
+            state.suspended = false
             autoEverywhere(&state)
         }
     }
@@ -87,6 +93,7 @@ public final class FanGovernor: Sendable {
     /// `reapplyDesired` puts the wishes back on wake.
     public func suspend() {
         state.withLock { state in
+            state.suspended = true
             state.smoothers = [:]
             autoEverywhere(&state)
         }
@@ -98,6 +105,7 @@ public final class FanGovernor: Sendable {
     /// trust "we already wrote that".
     public func reapplyDesired(now: Double = MonotonicTime.seconds) {
         state.withLock { state in
+            state.suspended = false
             state.written = [:]
             state.smoothers = [:]
             step(&state, now: now)
@@ -140,7 +148,7 @@ public final class FanGovernor: Sendable {
 
     private func step(_ state: inout State, now: Double) {
         // Nothing can be decided without the limits and the current mode.
-        guard readFans(into: &state) else { return }
+        guard readFans(into: &state), !state.suspended else { return }
 
         let engaged = state.interlock.update(hottestDie: hottestDie())
         for fan in state.fans {

@@ -184,6 +184,10 @@ func governorSuspendAndReapply() {
     #expect(governor.desiredModes[0] == .constant(rpm: 3000))
     #expect(governor.isActive == true)
 
+    // The 2 s timer keeps firing until the machine is asleep.
+    governor.tick(now: 2)
+    #expect(hardware.fans[0].manual == false)
+
     governor.reapplyDesired(now: 10)
     #expect(hardware.fans[0].manual == true)
     #expect(hardware.fans[0].target == 3000)
@@ -223,4 +227,17 @@ func snapshotRoundTrip() throws {
     let modeData = try #require(mode.jsonData)
     #expect(FanMode(json: modeData) == mode)
     #expect(FanMode(json: Data("not json".utf8)) == nil)
+}
+
+@Test("a restore during a sleep does not leave the governor suspended")
+func governorRestoreClearsSuspension() {
+    let hardware = InMemoryFanHardware.macBookPro()
+    let (governor, _) = makeGovernor(hardware: hardware)
+    governor.setMode(.constant(rpm: 3000), forFan: 0, now: 0)
+    governor.suspend()
+    governor.restoreAllAuto()
+
+    governor.setMode(.constant(rpm: 2500), forFan: 0, now: 20)
+    #expect(hardware.fans[0].manual == true)
+    #expect(hardware.fans[0].target == 2500)
 }
