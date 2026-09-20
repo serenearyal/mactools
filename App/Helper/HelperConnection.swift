@@ -1,3 +1,4 @@
+import FanControl
 import Foundation
 
 import HelperProtocol
@@ -74,6 +75,39 @@ actor HelperConnection {
         }
     }
 
+    // MARK: - Fans
+
+    func fanSnapshot() async throws(HelperConnectionError) -> FanSnapshot {
+        let data: Data = try await call { proxy, done in
+            proxy.fanSnapshot { data, error in
+                if let data {
+                    done(.success(data))
+                } else {
+                    done(.failure(.refused(error ?? "the helper returned no fan state and no reason")))
+                }
+            }
+        }
+        guard let snapshot = FanSnapshot(json: data) else {
+            throw .refused("the helper sent fan state this app cannot read")
+        }
+        return snapshot
+    }
+
+    func setFanMode(_ mode: FanMode, forFan index: Int) async throws(HelperConnectionError) {
+        guard let json = mode.jsonData else {
+            throw .refused("the fan mode could not be encoded")
+        }
+        try await callVoid { proxy, done in
+            proxy.setFanMode(fanIndex: index, modeJSON: json) { done($0) }
+        }
+    }
+
+    func restoreAllAuto() async throws(HelperConnectionError) {
+        try await callVoid { proxy, done in
+            proxy.restoreAllAuto { done($0) }
+        }
+    }
+
     // MARK: - Plumbing
 
     /// Runs one XPC call and returns the first of the reply, the connection
@@ -104,6 +138,18 @@ actor HelperConnection {
             // A dead connection stays dead; make the next call build a new one.
             if case .unavailable = error { disconnect() }
             throw error
+        }
+    }
+
+    /// The same, for the calls whose whole reply is "why not", where nil means
+    /// it worked.
+    private func callVoid(
+        _ body: (any VentHelperProtocol, @escaping @Sendable (String?) -> Void) -> Void
+    ) async throws(HelperConnectionError) {
+        _ = try await call { (proxy, done: @escaping @Sendable (Result<Bool, HelperConnectionError>) -> Void) in
+            body(proxy) { reason in
+                done(reason.map { .failure(.refused($0)) } ?? .success(true))
+            }
         }
     }
 

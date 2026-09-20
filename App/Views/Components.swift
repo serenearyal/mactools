@@ -18,6 +18,9 @@ enum Layout {
 struct Card<Content: View>: View {
     let title: String
     let symbolName: String
+    /// Cards in a grid row stretch so they end at the same line. A card in a
+    /// stack hugs its content instead.
+    var fills = true
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -33,9 +36,7 @@ struct Card<Content: View>: View {
             content
         }
         .padding(Layout.cardPadding)
-        // Stretching fills the row of the grid, so two cards side by side end
-        // at the same line.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
         .background {
             RoundedRectangle(cornerRadius: Layout.cardCorner, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor))

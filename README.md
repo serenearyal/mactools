@@ -62,6 +62,74 @@ log stream --predicate 'subsystem == "com.serenearyal.vent"' --level debug --sty
 
 Everything about the daemon is logged under the category `helper`, by the helper and by the app, so one stream shows both sides of a call.
 
+## Fan control
+
+The Fans tab lists every fan of the Mac with its current speed between its limits, and gives each one three modes.
+
+- **Auto** hands the fan to the firmware, which is how a Mac behaves out of the box.
+  A fan at idle reads 0 rpm in this mode: the firmware stops it, and that is normal.
+- **Constant** holds one speed, clamped to the range the firmware reports for that fan (1200-5779 rpm and 1200-6241 rpm on a MacBookPro18,3).
+- **Sensor-based** ramps the fan linearly between two temperatures of one sensor: minimum speed below the start temperature, maximum above the full-speed temperature.
+  The plot in the card shows the ramp, the current reading and the speed that follows from it.
+
+Fan control needs the privileged helper, because only root may write to the SMC.
+Without it the tab still shows the speeds, read directly, and says what is missing.
+
+### Safety
+
+Every path is built so that a fan ends up on Auto rather than stuck.
+
+- **Clamps.** Every setpoint is clamped to `F%dMn`/`F%dMx` before it is written. A request of 99999 rpm becomes the maximum, a negative one the minimum. A fan whose limits did not read back is refused, never written with a guess.
+- **Verified writes.** Mode and target are read back after every write. A write the SMC did not take is an error, not a silent no-op.
+- **Thermal interlock.** Any CPU or GPU die at 100 °C or above forces every fan back to Auto until the hottest die is below 90 °C. The chosen modes are kept and come back by themselves.
+- **Hysteresis and slew.** A curve follows a falling temperature only after it has fallen 0.5 °C, and moves its setpoint by at most 200 rpm per second. A constant speed is applied at once.
+- **Fail safe.** A sensor that stops answering, a curve that makes no sense, a write the SMC refuses: that fan goes back to Auto, the reason appears in the tab, and nothing is retried in a loop.
+
+### When the fans go back to Auto
+
+1. **The last client disconnects.** The helper holds a fan only while the app, or `ventctl`, is connected.
+   Quitting Vent, and `kill -9` of Vent, therefore returns the fans to Auto within about two seconds.
+   A fan curve needs Vent running; Macs Fan Control works the same way.
+2. **The helper is asked to stop.** SIGTERM, SIGINT and SIGHUP restore Auto before the process ends, and an `atexit` handler covers every other way out.
+3. **The helper starts.** It restores Auto unconditionally before it accepts the first connection, so a helper that was killed mid-curve cannot leave a fan forced across a restart. After a reboot the fans are on Auto.
+4. **Sleep and wake.** The fans go to Auto on the way into sleep; the modes are written again once the Mac is awake.
+
+Quitting the app also asks the helper to restore Auto directly, before the connection goes away.
+The four guarantees above are what covers a crash.
+
+### The CLI
+
+```sh
+ventctl fan-status              # fans, limits, modes, faults, interlock state
+ventctl fan-set 0 2500          # force fan 0 to 2500 rpm, clamped
+ventctl fan-auto 0              # one fan back to the firmware
+ventctl fan-auto                # every fan back to the firmware
+ventctl selftest-fans           # the gentle live sequence below
+```
+
+### Manual acceptance sequence
+
+Run this after any change to the fan code, with the helper installed and Vent running.
+`ventctl selftest-fans` does steps 1 to 3 by itself, with a temperature guard that aborts and restores Auto if any CPU sensor passes 85 °C.
+
+1. `ventctl fan-set 0 2500`, then watch `ventctl fan-status`: the fan reaches about 2500 rpm within 20 s.
+2. `ventctl fan-auto 0`: the mode column goes back to auto and the target to 0.
+3. Cross-check with `sudo powermetrics --samplers smc -n 1` while the fan is forced.
+4. Force a fan from the Fans tab, then `kill -9` the Vent process: the fans are on Auto within 2 s (`ventctl fans`).
+5. Force a fan, then `sudo launchctl kill SIGTERM system/com.serenearyal.vent.helper`: the fans are on Auto.
+6. Force a fan, close the lid, wait for sleep, open it: the fan comes back to the mode you chose.
+7. Set a sensor curve on a CPU sensor and load the machine: the speed follows the ramp, and it falls back slowly rather than oscillating.
+8. `ventctl fan-set 0 99999` and `ventctl fan-set 0 0`: both are clamped to the limits of that fan.
+9. Reboot: the fans are on Auto until Vent is started again.
+
+### Logs
+
+```sh
+log stream --predicate 'subsystem == "com.serenearyal.vent" AND category == "fans"' --style compact
+```
+
+Every mode change, every restore and every fault is a line there, on both sides of the XPC link.
+
 ## Keyboard lock
 
 Vent can hold the whole keyboard for a moment so you can wipe it.

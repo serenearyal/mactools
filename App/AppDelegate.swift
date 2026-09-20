@@ -12,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let services = AppServices.shared
         services.store.start()
+        // One pass at launch, so a fan mode the user chose last time is back
+        // before the window is even opened. The helper deliberately forgot it.
+        Task { await services.fans.refresh() }
         let controller = StatusItemController(
             settings: services.settings,
             store: services.store,
@@ -23,10 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyLaunchArguments(services: services)
     }
 
-    /// Last chance to give the keyboard back. A locked keyboard that outlives
-    /// the app would need a reboot.
+    /// Last chance to give the keyboard and the fans back. A locked keyboard
+    /// that outlives the app would need a reboot, and a forced fan would keep
+    /// running until the helper noticed the connection was gone.
     func applicationWillTerminate(_ notification: Notification) {
         AppServices.shared.keyboardLock.releaseForTermination()
+        AppServices.shared.fans.restoreAllAutoOnTermination()
     }
 
     /// Closing the window leaves the status item running.
@@ -75,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let seconds = Int(arguments[index + 1]) {
             services.keyboardLock.lock(seconds: LockTimeout.clampDebug(seconds))
         }
+        DebugFanBackend.applyLaunchArguments(arguments, to: services.fans)
         DebugCapture.run(arguments: arguments, services: services)
     }
 }

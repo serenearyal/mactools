@@ -17,4 +17,19 @@ import Foundation
 
     /// The raw bytes of one SMC key, or nil with the reason.
     func readSMCKey(_ key: String, reply: @escaping @Sendable (Data?, String?) -> Void)
+
+    /// `FanSnapshot` as JSON, or nil with the reason.
+    ///
+    /// JSON and not a payload class: `NSSecureCoding` would need a class, a
+    /// hand-written coder and an allowlist on both sides to carry three
+    /// numbers and an enum.
+    func fanSnapshot(reply: @escaping @Sendable (Data?, String?) -> Void)
+
+    /// Sets one fan to a `FanMode` encoded as JSON. The reply is the reason it
+    /// did not happen, or nil.
+    func setFanMode(fanIndex: Int, modeJSON: Data, reply: @escaping @Sendable (String?) -> Void)
+
+    /// Every fan back to the firmware curve. The one call that must always
+    /// work, so it reports a problem but never refuses to try.
+    func restoreAllAuto(reply: @escaping @Sendable (String?) -> Void)
 }

@@ -36,9 +36,19 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecked 
         let uid = connection.effectiveUserIdentifier
         connection.exportedInterface = NSXPCInterface(with: VentHelperProtocol.self)
         connection.exportedObject = service
-        connection.invalidationHandler = { [log] in
+
+        // Restore guarantee 1: the fans belong to the clients, and the last
+        // one to leave takes them back to Auto. XPC can call both handlers for
+        // one connection, and the registry ignores the second.
+        let fans = service.fans
+        let token = fans?.clientArrived()
+        let gone: @Sendable () -> Void = { [log] in
             log.info("client pid \(pid, privacy: .public) gone")
+            if let token { fans?.clientLeft(token: token) }
         }
+        connection.invalidationHandler = gone
+        connection.interruptionHandler = gone
+
         connection.resume()
         log.info("client pid \(pid, privacy: .public) uid \(uid, privacy: .public) accepted")
         return true

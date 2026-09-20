@@ -1,3 +1,4 @@
+import FanControl
 import Foundation
 import Observation
 
@@ -135,6 +136,10 @@ struct SettingsData: Codable, Equatable, Sendable {
     var showUnlabelledSensors: Bool = false
     /// The hard timeout of the keyboard lock, in seconds.
     var lockTimeoutSeconds: Int = LockTimeout.default
+    /// What each fan should do, by fan index as a string. The helper forgets
+    /// every mode as soon as the last client leaves, so this is the only
+    /// memory the choice has.
+    var fanModes: [String: FanMode] = [:]
 
     init() {}
 
@@ -160,6 +165,8 @@ struct SettingsData: Codable, Equatable, Sendable {
             try container.decodeIfPresent(Int.self, forKey: .lockTimeoutSeconds)
                 ?? fallback.lockTimeoutSeconds
         )
+        fanModes = try container.decodeIfPresent([String: FanMode].self, forKey: .fanModes)
+            ?? fallback.fanModes
     }
 }
 
@@ -221,6 +228,23 @@ final class AppSettings {
     var lockTimeoutSeconds: Int {
         get { LockTimeout.clamp(data.lockTimeoutSeconds) }
         set { data.lockTimeoutSeconds = LockTimeout.clamp(newValue); persist() }
+    }
+
+    /// The mode the user last chose for one fan, Auto by default.
+    func fanMode(forFan index: Int) -> FanMode {
+        data.fanModes[String(index)] ?? .auto
+    }
+
+    /// Auto is stored as the absence of an entry, so the file stays empty for
+    /// the ordinary case.
+    func setFanMode(_ mode: FanMode, forFan index: Int) {
+        guard fanMode(forFan: index) != mode else { return }
+        if mode.isAuto {
+            data.fanModes.removeValue(forKey: String(index))
+        } else {
+            data.fanModes[String(index)] = mode
+        }
+        persist()
     }
 
     /// The metrics that are off, in the fixed order of the enum.

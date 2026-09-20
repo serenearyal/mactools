@@ -22,7 +22,10 @@ commands:
   scan         run the largest-files scan
   helper-ping  check the privileged helper over XPC
   helper-read  read one SMC key through the privileged helper
-  selftest     run the fan safety sequence
+  fan-status   print the fan state the helper sees
+  fan-auto     hand one fan, or every fan, back to the firmware
+  fan-set      force one fan to a constant speed
+  selftest-fans  run the gentle live fan sequence with a temperature guard
 
 options:
   procs        --sort cpu|mem   order of the table (default cpu)
@@ -31,6 +34,8 @@ options:
   scan         --root PATH      where to start (default \(Scan.dataVolumePath))
                --top N          number of rows (default 20)
   helper-read  <KEY>            four-character SMC key, for example F0Ac
+  fan-auto     [index|all]      default all
+  fan-set      <index> <rpm>    clamped to the limits of that fan
 """
 
 func fail(_ message: String) -> Never {
@@ -139,9 +144,22 @@ do {
             root: options.string("root") ?? Scan.dataVolumePath,
             top: try options.integer("top", default: 20, range: 1...Scan.resultLimit)
         )
-    case "selftest":
+    case "fan-status":
         try withoutOptions()
-        fail("'\(command)' is not implemented yet")
+        try FanCommands.status()
+    case "fan-auto":
+        guard tail.count <= 1 else {
+            throw CLIError("'fan-auto' takes one fan index or 'all'")
+        }
+        try FanCommands.setAuto(tail.first)
+    case "fan-set":
+        guard tail.count == 2, let index = Int(tail[0]), let rpm = Int(tail[1]) else {
+            throw CLIError("'fan-set' takes a fan index and a speed, for example 'ventctl fan-set 0 2500'")
+        }
+        try FanCommands.setConstant(index: index, rpm: rpm)
+    case "selftest-fans", "selftest":
+        try withoutOptions()
+        try FanCommands.selftest()
     case "-h", "--help", "help":
         print(usage)
     default:

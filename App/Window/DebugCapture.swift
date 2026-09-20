@@ -105,6 +105,15 @@ enum DebugCapture {
             if services.selectedTab == .overview {
                 OverviewCards(store: services.store, settings: services.settings, twoColumns: true)
                     .padding(Layout.cardSpacing)
+            } else if services.selectedTab == .fans {
+                FansContent(
+                    store: services.store,
+                    fans: services.fans,
+                    settings: services.settings,
+                    helper: services.helper,
+                    showSettings: {},
+                    scrolls: false
+                )
             } else {
                 TabDetailView(tab: services.selectedTab, services: services)
             }
@@ -147,6 +156,10 @@ enum DebugCapture {
             "window main: \(window?.isMainWindow ?? false)",
             "sensors: \(snapshot.temperatures.count)",
             "fans: \(snapshot.fans.count)",
+            "helper fans: \(services.fans.fans.count)",
+            "helper fan modes: \(services.fans.fans.map(\.mode.summary).joined(separator: " | "))",
+            "fan interlock: \(services.fans.interlockEngaged)",
+            "fan failure: \(services.fans.failure ?? "none")",
             "power rails: \(snapshot.power.count)",
             "volumes: \(snapshot.volumes.count)",
             "cpu sample: \(snapshot.cpu != nil)",

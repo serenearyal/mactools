@@ -41,9 +41,12 @@ struct TabDetailView: View {
         case .overview:
             OverviewView(store: services.store, settings: services.settings)
         case .fans:
-            PlaceholderTabView(
-                tab: .fans,
-                description: "Fan speeds, curves and manual control arrive with the privileged helper."
+            FansView(
+                store: services.store,
+                fans: services.fans,
+                settings: services.settings,
+                helper: services.helper,
+                showSettings: { services.selectedTab = .settings }
             )
         case .sensors:
             SensorsView(store: services.store, settings: services.settings)

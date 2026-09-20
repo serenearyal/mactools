@@ -5,13 +5,27 @@ public enum FanKeys {
     /// The key Intel machines need before a mode change is accepted.
     public static let forceTargets: SMCFourCC = "Ftst"
 
+    /// Live speed, `flt `.
+    public static let actual = "Ac"
+    /// Lowest speed the firmware allows, `flt `.
+    public static let minimum = "Mn"
+    /// Highest speed the firmware allows, `flt `.
+    public static let maximum = "Mx"
+    /// The setpoint a forced fan holds, `flt `.
+    public static let target = "Tg"
+    /// 0 auto, 1 forced, `ui8 `. Uppercase on Apple silicon.
+    public static let mode = "Md"
+
     public static func key(fan index: Int, suffix: String) -> SMCFourCC? {
         guard (0...9).contains(index), suffix.count == 2 else { return nil }
         return SMCFourCC(code: "F\(index)\(suffix)")
     }
 }
 
-public enum FanMode: String, Sendable {
+/// The value of the `F%dMd` register: what the firmware is doing right now.
+/// The mode the user asked for is `FanControl.FanMode`, which is a different
+/// thing: a curve is `forced` here on every tick.
+public enum SMCFanMode: String, Sendable, Codable {
     case auto
     case forced
     case unknown
@@ -31,15 +45,15 @@ public struct FanCapabilities: Sendable, Equatable {
     }
 }
 
-public struct FanReading: Sendable, Equatable {
+public struct FanReading: Sendable, Equatable, Codable {
     public let index: Int
     public let actual: Double
     public let minimum: Double
     public let maximum: Double
     public let target: Double
-    public let mode: FanMode
+    public let mode: SMCFanMode
 
-    public init(index: Int, actual: Double, minimum: Double, maximum: Double, target: Double, mode: FanMode) {
+    public init(index: Int, actual: Double, minimum: Double, maximum: Double, target: Double, mode: SMCFanMode) {
         self.index = index
         self.actual = actual
         self.minimum = minimum
@@ -104,10 +118,10 @@ extension SMCConnection {
             readings.append(
                 FanReading(
                     index: index,
-                    actual: value("Ac") ?? 0,
-                    minimum: value("Mn") ?? 0,
-                    maximum: value("Mx") ?? 0,
-                    target: value("Tg") ?? 0,
+                    actual: value(FanKeys.actual) ?? 0,
+                    minimum: value(FanKeys.minimum) ?? 0,
+                    maximum: value(FanKeys.maximum) ?? 0,
+                    target: value(FanKeys.target) ?? 0,
                     mode: modeValue.map { $0 == 0 ? .auto : .forced } ?? .unknown
                 )
             )

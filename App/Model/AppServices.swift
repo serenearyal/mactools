@@ -13,6 +13,7 @@ final class AppServices {
     let store: MetricsStore
     let storage = StorageStore()
     let helper = HelperController()
+    let fans: FanStore
     let keyboardLock: KeyboardLockController
     let windowController = MainWindowController()
     /// Set by the app delegate once the status item exists.
@@ -34,6 +35,14 @@ final class AppServices {
         let settings = AppSettings()
         self.settings = settings
         store = MetricsStore(settings: settings)
+        // The fake fans keep their modes to themselves: a screenshot run must
+        // not rewrite what the user's real fans do.
+        let fake = DebugFanBackend.isRequested
+        fans = FanStore(
+            settings: settings,
+            backend: fake ? DebugFanBackend() : HelperFanBackend(),
+            persistsModes: !fake
+        )
         keyboardLock = KeyboardLockController(settings: settings)
         windowController.store = store
     }

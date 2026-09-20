@@ -121,9 +121,12 @@ targets:
     sources:
       - Tests/VentIntegrationTests
       # The helper service, without its main.swift, so the XPC round trip can
-      # be tested over an anonymous listener with no daemon installed.
+      # be tested over an anonymous listener with no daemon installed. The fan
+      # coordinator comes with it, driven by a fake instead of the SMC.
       - Helper/HelperService.swift
       - Helper/ClientAuth.swift
+      - Helper/FanCoordinator.swift
+      - Helper/PowerWatcher.swift
       # The installer builds a shell script and an AppleScript by hand; the
       # tests lint and compile what it builds.
       - App/Helper/HelperInstalling.swift
