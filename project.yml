@@ -66,6 +66,7 @@ targets:
           - ReportKit
           - AwakeKit
           - BacklightKit
+          - WindowKit
       - target: VentHelper
         embed: true
         link: false
@@ -98,6 +99,27 @@ targets:
           - SysMetrics
           - HelperProtocol
 
+  # The window the mover is tested against. A bundled app, because an
+  # unbundled binary vends no accessibility server at all, and one of ours,
+  # because no test may move a window of the user's. It is never embedded in
+  # Vent.app: it sits next to it in the build directory and `make
+  # window-selftest` passes its path.
+  VentAXProbe:
+    type: application
+    platform: macOS
+    sources:
+      - Probe
+    settings:
+      base:
+        PRODUCT_NAME: VentAXProbe
+        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.axprobe
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Vent AX Probe
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "2"
+        SKIP_INSTALL: YES
+
   ventctl:
     templates:
       - CommandLineTool
@@ -117,6 +139,9 @@ targets:
       - App/Backlight/BacklightClient.swift
       - App/Backlight/BacklightEngine.swift
       - App/Backlight/KeyboardBacklightClient.swift
+      # The accessibility reads of `ventctl window list` are the app's, so the
+      # CLI cannot drift from what the window manager sees.
+      - App/Windows/AXBridge.swift
     settings:
       base:
         PRODUCT_NAME: ventctl
@@ -182,6 +207,9 @@ targets:
       - App/Power/PowerSource.swift
       - App/Backlight/BacklightClient.swift
       - App/Backlight/BacklightEngine.swift
+      # What the window manager remembers: the shortcut choice, the per-action
+      # switches and the gap. A plain Codable value, away from the AX calls.
+      - App/Windows/WindowSettingsData.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.integration-tests
@@ -197,6 +225,7 @@ targets:
           - ReportKit
           - AwakeKit
           - BacklightKit
+          - WindowKit
 
 schemes:
   Vent:
@@ -204,6 +233,7 @@ schemes:
       targets:
         Vent: all
         ventctl: all
+        VentAXProbe: all
         VentIntegrationTests: [test]
     run:
       config: Debug

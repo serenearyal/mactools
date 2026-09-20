@@ -38,6 +38,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Keep Awake starts off every launch by design; this only subscribes
         // it to the battery pushes its guard needs.
         services.keepAwake.start()
+        // Claims the chords of the chosen set. Off by default, so this is one
+        // conflict scan and nothing else until the user picks a set.
+        services.windows.start()
         let controller = StatusItemController(
             settings: services.settings,
             store: services.store,
@@ -118,6 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         services.keyboardLock.releaseForTermination()
         services.keepAwake.releaseForTermination()
+        // Every chord goes back to the system, so the next app that asks for
+        // it gets it instead of `eventHotKeyExistsErr`.
+        services.windows.stop()
         services.storage.cancelScan()
         services.fans.restoreAllAutoOnTermination()
     }
@@ -279,6 +285,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // hardened Release build managed to read out of CoreBrightness.
         if arguments.contains("--backlight-probe") {
             services.backlight.probe()
+        }
+        // `--shortcut-set off|rectangle|alternate`: claim one set for this run
+        // and write nothing back. It is how a run proves which chords another
+        // app already owns, without pressing a key.
+        if let index = arguments.firstIndex(of: "--shortcut-set"), index + 1 < arguments.count,
+           let choice = WindowShortcutChoice(argument: arguments[index + 1]) {
+            services.windows.overrideChoice(choice)
+        }
+        // `--window-selftest <probe.app>`: move a window of our own probe app
+        // through every action and check the result against `WindowKit`. It
+        // touches no other window, and it quits when the table is written.
+        if let index = arguments.firstIndex(of: "--window-selftest"), index + 1 < arguments.count {
+            let output = arguments.firstIndex(of: "--window-selftest-out")
+                .flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
+            WindowSelfTest.run(
+                probePath: arguments[index + 1],
+                outputDirectory: output,
+                services: services
+            )
         }
         DebugFanBackend.applyLaunchArguments(arguments, to: services.fans)
         DebugCapture.run(arguments: arguments, services: services)

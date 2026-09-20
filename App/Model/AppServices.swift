@@ -20,6 +20,8 @@ final class AppServices {
     let reports: ReportService
     let keepAwake: KeepAwakeController
     let backlight = KeyboardBacklightController()
+    /// The window manager: the captured window, the tiles and the chords.
+    let windows: WindowManagerController
     /// The first-run checklist and the login item behind it.
     let setup: SetupChecklist
     let windowController = MainWindowController()
@@ -125,6 +127,9 @@ final class AppServices {
         )
         let keyboardLock = KeyboardLockController(settings: settings)
         self.keyboardLock = keyboardLock
+        // The lock owns the Accessibility prompt, and the window manager needs
+        // the same grant, so it borrows that one implementation.
+        windows = WindowManagerController(settings: settings, permissions: keyboardLock)
         let helper = HelperController()
         self.helper = helper
         setup = SetupChecklist(settings: settings, helper: helper, lock: keyboardLock)

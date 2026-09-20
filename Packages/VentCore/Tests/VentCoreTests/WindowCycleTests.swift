@@ -229,3 +229,29 @@ func ladderOnPortrait() throws {
     #expect(first == rect(0, 1280, 1080, 640))
     #expect(ladder.state?.slot.axis == .vertical)
 }
+
+/// A window with a minimum size refuses the narrow rungs of the ladder. The
+/// mover tells the ladder where the window really landed, so the next press
+/// still counts as a repeat instead of starting over.
+@Test("the ladder follows a window that refused to shrink")
+func ladderRemembersTheAppliedFrame() throws {
+    var ladder = CycleLadder()
+    let half = try #require(press(&ladder, .leftHalf, current: sampleWindow, after: 0))
+    let twoThirds = try #require(press(&ladder, .leftHalf, current: half, after: 0.5))
+    // The app refused anything under 800 pt wide, so the two thirds rung is
+    // 800 pt wide and not the 1008 pt it was given.
+    let applied = rect(0, 0, 800, 949)
+    #expect(twoThirds != applied)
+    ladder.rememberApplied(frame: applied)
+    #expect(ladder.state?.frame == applied)
+    #expect(ladder.state?.slot.span == .twoThirds)
+    // The third rung, from a window that is where the mover left it.
+    #expect(press(&ladder, .leftHalf, current: applied, after: 1) == rect(0, 0, 504, 949))
+}
+
+@Test("remembering an applied frame does nothing without a state")
+func rememberAppliedNeedsAState() {
+    var ladder = CycleLadder()
+    ladder.rememberApplied(frame: rect(0, 0, 100, 100))
+    #expect(ladder.state == nil)
+}

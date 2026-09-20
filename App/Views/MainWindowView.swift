@@ -94,9 +94,8 @@ struct TabDetailView: View {
             KeepAwakeView(keepAwake: services.keepAwake)
         case .backlight:
             BacklightView(backlight: services.backlight)
-        // R7 fills this one. It samples nothing until it does.
         case .windows:
-            PlaceholderTabView(tab: tab)
+            WindowsView(controller: services.windows, settings: services.settings)
         case .keyboardLock:
             KeyboardLockView(settings: services.settings, lock: services.keyboardLock)
         case .settings:

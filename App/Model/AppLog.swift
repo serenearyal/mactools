@@ -24,6 +24,8 @@ enum AppLog {
     /// half of every line under the same category.
     static let fans = logger(category: "fans")
     static let lock = logger(category: "lock")
+    /// The window manager: what was moved where, and which chord was taken.
+    static let windows = logger(category: "windows")
     static let scan = logger(category: "scan")
     static let procs = logger(category: "procs")
 

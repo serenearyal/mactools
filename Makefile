@@ -1,4 +1,4 @@
-.PHONY: gen build test install run release clean
+.PHONY: gen build test install run release clean window-selftest
 
 PROJECT      := Vent.xcodeproj
 SCHEME       := Vent
@@ -50,6 +50,30 @@ release:
 
 run: install
 	open "$(INSTALLED)"
+
+# The window mover against a real accessibility server.
+#
+# It runs the app built here, never the installed one, and it drives one probe
+# window of ours: no window of the user's is touched, and nothing takes the
+# front. Accessibility is granted by code identity, so this build inherits the
+# grant of com.serenearyal.vent.
+SELFTEST_DIR := $(DERIVED)/selftest
+PROBE        := $(PRODUCTS)/VentAXProbe.app
+
+window-selftest: build
+	@test -d "$(PROBE)" || { echo "error: $(PROBE) is missing"; exit 1; }
+	@rm -f "$(SELFTEST_DIR)/window-selftest.txt"
+	@mkdir -p "$(SELFTEST_DIR)"
+	open -g -n "$(APP)" --args --no-activate \
+		--window-selftest "$(PROBE)" --window-selftest-out "$(SELFTEST_DIR)"
+	@for i in $$(seq 1 60); do \
+		test -f "$(SELFTEST_DIR)/window-selftest.txt" && break; \
+		sleep 1; \
+	done
+	@test -f "$(SELFTEST_DIR)/window-selftest.txt" \
+		|| { echo "error: the self test wrote no table"; exit 1; }
+	@cat "$(SELFTEST_DIR)/window-selftest.txt"
+	@grep -q "WINDOW SELFTEST: PASS" "$(SELFTEST_DIR)/window-selftest.txt"
 
 clean:
 	rm -rf $(DERIVED) Packages/VentCore/.build

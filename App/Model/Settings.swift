@@ -1,7 +1,9 @@
 import AwakeKit
+import CoreGraphics
 import FanControl
 import Foundation
 import Observation
+import WindowKit
 
 enum MenuBarLabelStyle: String, CaseIterable, Codable, Identifiable, Sendable {
     case twoLine
@@ -119,6 +121,9 @@ struct SettingsData: Codable, Equatable, Sendable {
     var keepAwakeDisplay: Bool = false
     var keepAwakeBatteryGuard: Bool = true
     var keepAwakeBatteryThreshold: Int = 20
+    /// The window manager: the shortcut set, the gap and its two switches.
+    /// One nested value, so the settings file gains one key.
+    var windows = WindowSettingsData()
 
     init() {}
 
@@ -168,6 +173,8 @@ struct SettingsData: Codable, Equatable, Sendable {
             try container.decodeIfPresent(Int.self, forKey: .keepAwakeBatteryThreshold)
                 ?? fallback.keepAwakeBatteryThreshold
         ).clamped(to: KeepAwakeOptions.thresholdRange)
+        windows = try container.decodeIfPresent(WindowSettingsData.self, forKey: .windows)
+            ?? fallback.windows
     }
 }
 
@@ -253,6 +260,19 @@ final class AppSettings {
             data.keepAwakeBatteryGuard = newValue.batteryGuardEnabled
             data.keepAwakeBatteryThreshold = newValue.batteryThreshold
                 .clamped(to: KeepAwakeOptions.thresholdRange)
+            persist()
+        }
+    }
+
+    /// The window manager's own settings. One accessor for the whole value:
+    /// `settings.windows.gap = 12` reads it, changes it and writes it back.
+    var windows: WindowSettingsData {
+        get { data.windows }
+        set {
+            var clamped = newValue
+            clamped.gap = Double(WindowLayout.clampGap(CGFloat(newValue.gap)))
+            guard data.windows != clamped else { return }
+            data.windows = clamped
             persist()
         }
     }
