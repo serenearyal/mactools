@@ -14,7 +14,6 @@ import SysMetrics
 actor MetricsSampler {
     private let cpuSampler = CPUSampler()
     private let diskIOSampler = DiskIOSampler()
-    private let processSampler = ProcessSampler()
 
     private var connection: SMCConnection?
     private var connectionTried = false
@@ -57,15 +56,6 @@ actor MetricsSampler {
             }
         }
         return sample
-    }
-
-    func sampleProcesses() -> [ProcessInfoRow] {
-        (try? processSampler.sample()) ?? []
-    }
-
-    /// Frees the per-process CPU baselines while the process list is hidden.
-    func resetProcesses() {
-        processSampler.reset()
     }
 
     // MARK: - SMC

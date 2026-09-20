@@ -30,6 +30,7 @@ commands:
 options:
   procs        --sort cpu|mem   order of the table (default cpu)
                --top N          number of rows (default 15)
+               --helper         merge the snapshot of the privileged helper
   watch        --interval S     seconds between lines (default 1)
   scan         --root PATH      where to start (default \(Scan.dataVolumePath))
                --top N          number of rows (default 20)
@@ -43,24 +44,33 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-/// Plain `--name value` parsing: no third-party package for four options.
+/// Plain `--name value` parsing, plus `--name` on its own for a flag: no
+/// third-party package for five options.
 struct Options {
     private var values: [String: String] = [:]
+    private var present: Set<String> = []
 
-    init(_ tokens: [String], allowed: Set<String>) throws {
+    init(_ tokens: [String], allowed: Set<String>, flags: Set<String> = []) throws {
         var rest = tokens[...]
         while let token = rest.first {
             rest = rest.dropFirst()
-            guard token.hasPrefix("--"), allowed.contains(String(token.dropFirst(2))) else {
+            let name = String(token.dropFirst(2))
+            guard token.hasPrefix("--"), allowed.contains(name) || flags.contains(name) else {
                 throw CLIError("unexpected argument '\(token)'")
+            }
+            if flags.contains(name) {
+                present.insert(name)
+                continue
             }
             guard let value = rest.first else { throw CLIError("'\(token)' needs a value") }
             rest = rest.dropFirst()
-            values[String(token.dropFirst(2))] = value
+            values[name] = value
         }
     }
 
     func string(_ name: String) -> String? { values[name] }
+
+    func flag(_ name: String) -> Bool { present.contains(name) }
 
     func integer(_ name: String, default fallback: Int, range: ClosedRange<Int>) throws -> Int {
         guard let text = values[name] else { return fallback }
@@ -117,7 +127,7 @@ do {
         let options = try Options(tail, allowed: ["interval"])
         try MetricsCommands.io(interval: try options.double("interval", default: 1, range: 0.1...60))
     case "procs":
-        let options = try Options(tail, allowed: ["sort", "top", "interval"])
+        let options = try Options(tail, allowed: ["sort", "top", "interval"], flags: ["helper"])
         let name = options.string("sort") ?? "cpu"
         guard let sort = ProcessSort(rawValue: name) else {
             throw CLIError("'--sort' takes 'cpu' or 'mem', not '\(name)'")
@@ -125,7 +135,8 @@ do {
         try MetricsCommands.processes(
             sort: sort,
             top: try options.integer("top", default: 15, range: 1...10_000),
-            interval: try options.double("interval", default: 1, range: 0.1...60)
+            interval: try options.double("interval", default: 1, range: 0.1...60),
+            useHelper: options.flag("helper")
         )
     case "watch":
         let options = try Options(tail, allowed: ["interval"])

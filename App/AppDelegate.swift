@@ -1,4 +1,5 @@
 import AppKit
+import SysMetrics
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -59,6 +60,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if arguments.contains("--show-window") {
             services.windowController.show()
+        }
+        // `--processes-sort name` opens the table on another column, so a
+        // capture run can check that the order of a column that does not
+        // change between samples really does not move.
+        if let index = arguments.firstIndex(of: "--processes-sort"),
+           index + 1 < arguments.count,
+           let key = ProcessSortKey(rawValue: arguments[index + 1].lowercased()) {
+            services.processes.sortOrder = [ProcessComparator(key: key, order: key == .cpu ? .reverse : .forward)]
         }
         // `--scan-root <path>` fills the Storage table at launch, so a
         // screenshot run does not need a click or a whole-disk scan.

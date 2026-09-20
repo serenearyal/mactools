@@ -32,4 +32,28 @@ import Foundation
     /// Every fan back to the firmware curve. The one call that must always
     /// work, so it reports a problem but never refuses to try.
     func restoreAllAuto(reply: @escaping @Sendable (String?) -> Void)
+
+    /// `[ProcessInfoRow]` as JSON for the processes the calling user does not
+    /// own, or nil with the reason.
+    ///
+    /// Those are the rows libproc refuses the app with EPERM, and they are the
+    /// only ones worth sending: the client already has its own, and a full
+    /// table would double a 580-row payload every three seconds.
+    ///
+    /// `excludingUID` is what the client believes its uid is. The helper
+    /// filters by the uid of the XPC connection and never by this number; a
+    /// mismatch is logged. The argument stays because a mismatch is worth
+    /// seeing in the log of a machine where something is wrong.
+    ///
+    /// The helper keeps its own CPU baselines, so the first snapshot after the
+    /// helper starts reports nil CPU for every row, exactly as the app's own
+    /// first pass does.
+    func processSnapshot(excludingUID: UInt32, reply: @escaping @Sendable (Data?, String?) -> Void)
+
+    /// Sends SIGTERM or SIGKILL to a process the calling user cannot signal
+    /// itself. The reply is the reason it did not happen, or nil.
+    ///
+    /// Only those two signals, never pid 0 or 1, and never the helper itself.
+    /// Every call is logged, granted or refused.
+    func signalProcess(pid: Int32, signal: Int32, reply: @escaping @Sendable (String?) -> Void)
 }

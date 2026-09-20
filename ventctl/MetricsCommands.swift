@@ -74,14 +74,35 @@ enum MetricsCommands {
         }
     }
 
-    static func processes(sort: ProcessSort, top: Int, interval: Double) throws {
+    /// `--helper` merges the snapshot of the privileged helper into the local
+    /// pass, which is the only way to see the CPU and memory of a process this
+    /// user does not own. Two helper calls, so its CPU deltas cover the same
+    /// interval as the local ones.
+    static func processes(sort: ProcessSort, top: Int, interval: Double, useHelper: Bool) throws {
         let sampler = ProcessSampler()
         _ = try sampler.sample()
+        var helperFailure: String?
+        if useHelper {
+            do {
+                _ = try HelperCommands.processSnapshot()
+            } catch {
+                helperFailure = "\(error)"
+            }
+        }
         Thread.sleep(forTimeInterval: interval)
         // The second pass is the one with CPU percentages; sort that one
         // rather than sampling a third time.
-        let all = try sampler.sample()
+        var all = try sampler.sample()
         guard !all.isEmpty else { throw CLIError("the process table is empty") }
+        var privileged: [ProcessInfoRow] = []
+        if useHelper, helperFailure == nil {
+            do {
+                privileged = try HelperCommands.processSnapshot()
+                all = ProcessSampler.merge(local: all, privileged: privileged)
+            } catch {
+                helperFailure = "\(error)"
+            }
+        }
         let rows = switch sort {
         case .cpu: ProcessSampler.topByCPU(all, count: top)
         case .memory: ProcessSampler.topByMemory(all, count: top)
@@ -94,6 +115,13 @@ enum MetricsCommands {
             print("\(pad("\(row.pid)", 8))\(pad("\(row.parentPID)", 8))\(pad("\(row.uid)", 7))\(pad(cpu, 9))\(pad(memory, 12))\(row.name)")
         }
         print("\n\(all.count) processes, \(all.count { $0.isRestricted }) refuse their counters without root")
+        if useHelper {
+            if let helperFailure {
+                print("helper: \(helperFailure)")
+            } else {
+                print("helper: \(privileged.count) rows merged")
+            }
+        }
     }
 
     /// One line per tick until Ctrl-C. The SMC catalog load costs about a

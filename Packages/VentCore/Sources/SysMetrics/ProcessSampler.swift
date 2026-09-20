@@ -280,7 +280,12 @@ public final class ProcessSampler: Sendable {
         if let bundle = components.last(where: { $0.hasSuffix(".app") }) {
             return String(bundle.dropLast(4))
         }
-        return components.last.map(String.init) ?? command
+        // Version managers name the executable after its version
+        // (".../claude/versions/2.1.278"); the tool's folder is the useful name.
+        let isVersion = { (part: Substring) in
+            part == "versions" || part.allSatisfy { $0.isNumber || $0 == "." }
+        }
+        return (components.last { !isVersion($0) } ?? components.last).map(String.init) ?? command
     }
 
     // MARK: - libproc

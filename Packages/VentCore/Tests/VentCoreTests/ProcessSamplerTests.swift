@@ -189,6 +189,12 @@ struct ProcessRowTests {
                 command: "logd"
             ) == "logd"
         )
+        #expect(
+            ProcessSampler.displayName(
+                executablePath: "/Users/x/.local/share/claude/versions/2.1.278",
+                command: "2.1.278"
+            ) == "claude"
+        )
         // comm is cut at 16 characters, so the path wins whenever there is one.
         #expect(
             ProcessSampler.displayName(

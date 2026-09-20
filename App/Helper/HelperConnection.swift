@@ -2,6 +2,7 @@ import FanControl
 import Foundation
 
 import HelperProtocol
+import SysMetrics
 
 enum HelperConnectionError: Error, LocalizedError, Equatable, Sendable {
     /// The connection failed: no daemon, a signature that does not match the
@@ -105,6 +106,33 @@ actor HelperConnection {
     func restoreAllAuto() async throws(HelperConnectionError) {
         try await callVoid { proxy, done in
             proxy.restoreAllAuto { done($0) }
+        }
+    }
+
+    // MARK: - Processes
+
+    /// The rows of the processes this user does not own, with the counters
+    /// libproc refuses an unprivileged pass. The helper filters by the uid of
+    /// the connection; the argument only tells it what this side believes.
+    func processSnapshot(excludingUID uid: uid_t = getuid()) async throws(HelperConnectionError) -> [ProcessInfoRow] {
+        let data: Data = try await call { proxy, done in
+            proxy.processSnapshot(excludingUID: UInt32(uid)) { data, error in
+                if let data {
+                    done(.success(data))
+                } else {
+                    done(.failure(.refused(error ?? "the helper returned no process list and no reason")))
+                }
+            }
+        }
+        guard let rows = try? JSONDecoder().decode([ProcessInfoRow].self, from: data) else {
+            throw .refused("the helper sent a process list this app cannot read")
+        }
+        return rows
+    }
+
+    func signalProcess(pid: Int32, signal: ProcessSignal) async throws(HelperConnectionError) {
+        try await callVoid { proxy, done in
+            proxy.signalProcess(pid: pid, signal: signal.rawValue) { done($0) }
         }
     }
 

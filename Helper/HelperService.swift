@@ -5,6 +5,7 @@ import os
 import FanControl
 import HelperProtocol
 import SMCKit
+import SysMetrics
 
 /// The one logger of the helper process.
 ///
@@ -40,6 +41,9 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
     private let smc: SMCConnection?
     private let smcError: String?
     private let log = HelperLog.logger
+    /// One sampler for the life of the helper: the CPU percent of a process is
+    /// a delta, and a fresh sampler per call would only ever report nil.
+    private let processes = ProcessSampler()
 
     /// nil when the SMC would not describe its fans. Every fan method then
     /// answers with `fanError`.
@@ -158,6 +162,77 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
             return
         }
         reply(fans.restoreAllAuto())
+    }
+
+    // MARK: - Processes
+
+    /// The rows of every process the calling user does not own, sampled as
+    /// root so the CPU and memory counters libproc refuses the app are filled
+    /// in.
+    ///
+    /// The uid comes from the connection, never from the argument: a client
+    /// that asked for uid 0 to be excluded would otherwise be handed the whole
+    /// table, its own rows included, for nothing.
+    func processSnapshot(excludingUID: UInt32, reply: @escaping @Sendable (Data?, String?) -> Void) {
+        if let failure = privilegeFailure() {
+            reply(nil, failure)
+            return
+        }
+        guard let connection = NSXPCConnection.current() else {
+            reply(nil, "the helper cannot tell which user is calling")
+            return
+        }
+        let caller = connection.effectiveUserIdentifier
+        if caller != excludingUID {
+            log.error(
+                """
+                client pid \(connection.processIdentifier, privacy: .public) claims uid \
+                \(excludingUID, privacy: .public) on a connection of uid \(caller, privacy: .public); \
+                the connection wins
+                """
+            )
+        }
+        do {
+            let rows = try processes.sample().filter { $0.uid != caller }
+            guard let data = try? JSONEncoder().encode(rows) else {
+                reply(nil, "the process list could not be encoded")
+                return
+            }
+            log.debug("process snapshot: \(rows.count, privacy: .public) rows for uid \(caller, privacy: .public)")
+            reply(data, nil)
+        } catch {
+            log.error("the process table failed: \(error.description, privacy: .public)")
+            reply(nil, error.description)
+        }
+    }
+
+    /// SIGTERM or SIGKILL, and nothing else. Every call is logged with the
+    /// client that asked for it, granted or refused: this is the one method
+    /// that ends somebody else's work.
+    func signalProcess(pid: Int32, signal: Int32, reply: @escaping @Sendable (String?) -> Void) {
+        if let failure = privilegeFailure() {
+            reply(failure)
+            return
+        }
+        let client = NSXPCConnection.current()?.processIdentifier ?? -1
+        if let refusal = ProcessSignalPolicy.refusal(pid: pid, signal: signal, senderPID: getpid()) {
+            log.error(
+                """
+                refused signal \(signal, privacy: .public) to pid \(pid, privacy: .public) \
+                for client pid \(client, privacy: .public): \(refusal, privacy: .public)
+                """
+            )
+            reply(refusal)
+            return
+        }
+        let failure = ProcessSignalPolicy.send(pid: pid, signal: signal)
+        log.notice(
+            """
+            signal \(signal, privacy: .public) to pid \(pid, privacy: .public) \
+            for client pid \(client, privacy: .public): \(failure ?? "sent", privacy: .public)
+            """
+        )
+        reply(failure)
     }
 
     // MARK: - Privilege

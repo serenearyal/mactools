@@ -2,6 +2,7 @@ import Foundation
 
 import FanControl
 import HelperProtocol
+import SysMetrics
 
 /// The helper side of the CLI.
 ///
@@ -21,6 +22,14 @@ enum HelperCommands {
         let data = try blocking { try await connection.readSMCKey(key) }
         let hex = data.map { String(format: "%02x", $0) }.joined(separator: " ")
         print("\(key)  \(data.count) bytes  \(hex.isEmpty ? "-" : hex)")
+    }
+
+    // MARK: - Processes, for MetricsCommands
+
+    /// The rows of the processes this user does not own, as the helper sees
+    /// them with root privileges.
+    static func processSnapshot() throws -> [ProcessInfoRow] {
+        try blocking { try await connection.processSnapshot() }
     }
 
     // MARK: - Fans, for FanCommands

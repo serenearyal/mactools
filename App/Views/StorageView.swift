@@ -472,44 +472,6 @@ private struct FolderBar: View {
 
 // MARK: - Pieces
 
-/// A rounded search field with the magnifier the rest of the system uses.
-/// `.searchable` would put the field in a window toolbar this window does not
-/// have.
-private struct SearchField: View {
-    @Binding var text: String
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-                .imageScale(.small)
-            TextField("Search", text: $text)
-                .textFieldStyle(.plain)
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                        .imageScale(.small)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .font(.callout)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color(nsColor: .textBackgroundColor))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
-                }
-        }
-    }
-}
-
 /// Icons for the table.
 ///
 /// `NSWorkspace.icon(forFile:)` opens the file to look for a custom icon,

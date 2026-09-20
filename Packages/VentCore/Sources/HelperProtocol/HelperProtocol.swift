@@ -26,8 +26,8 @@ public enum HelperConstants {
     public static let teamIdentifier = "M9Q5YCJ5NU"
 
     /// Wire version of the helper protocol. Bumped on any breaking change.
-    /// 2 added the three fan methods.
-    public static let protocolVersion = 2
+    /// 2 added the three fan methods, 3 the process snapshot and the signal.
+    public static let protocolVersion = 3
 
     /// What the helper demands of a client before it accepts the connection.
     ///

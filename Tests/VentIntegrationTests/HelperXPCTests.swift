@@ -3,6 +3,7 @@ import XCTest
 
 import FanControl
 import HelperProtocol
+import SysMetrics
 
 /// A real XPC round trip against the real service object.
 ///
@@ -251,6 +252,157 @@ final class HelperFanXPCTests: XCTestCase {
         connection.remoteObjectInterface = NSXPCInterface(with: VentHelperProtocol.self)
         connection.resume()
         XCTAssertTrue(try snapshot().isAllAuto)
+    }
+}
+
+/// The two process methods over the same anonymous listener.
+///
+/// `requiresRoot: false` again, so the whole path runs as a normal user: the
+/// snapshot then carries the rows of the other users with empty counters,
+/// which is exactly the shape the app merges. What only a real daemon can
+/// show is the counters themselves.
+final class HelperProcessXPCTests: XCTestCase {
+    private var listener: NSXPCListener!
+    private var delegate: HelperListenerDelegate!
+    private var connection: NSXPCConnection!
+    private var children: [Process] = []
+
+    override func setUp() {
+        super.setUp()
+        let service = HelperService(fanHardware: InMemoryFanHardware.macBookPro(), requiresRoot: false)
+        delegate = HelperListenerDelegate(service: service)
+        listener = NSXPCListener.anonymous()
+        listener.delegate = delegate
+        listener.resume()
+
+        connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        connection.remoteObjectInterface = NSXPCInterface(with: VentHelperProtocol.self)
+        connection.resume()
+    }
+
+    override func tearDown() {
+        for child in children where child.isRunning { child.terminate() }
+        children = []
+        connection.invalidate()
+        listener.invalidate()
+        connection = nil
+        listener = nil
+        delegate = nil
+        super.tearDown()
+    }
+
+    private func proxy() throws -> any VentHelperProtocol {
+        let raw = connection.remoteObjectProxyWithErrorHandler { error in
+            XCTFail("XPC connection error: \(error)")
+        }
+        return try XCTUnwrap(raw as? any VentHelperProtocol)
+    }
+
+    private func snapshot(excludingUID uid: UInt32 = geteuid()) throws -> [ProcessInfoRow] {
+        let answered = expectation(description: "process snapshot")
+        let inbox = Inbox<ReadReply>()
+        try proxy().processSnapshot(excludingUID: uid) { data, error in
+            inbox.put(ReadReply(data: data, error: error))
+            answered.fulfill()
+        }
+        wait(for: [answered], timeout: 10)
+        let reply = try XCTUnwrap(inbox.value)
+        XCTAssertNil(reply.error)
+        return try JSONDecoder().decode([ProcessInfoRow].self, from: try XCTUnwrap(reply.data))
+    }
+
+    private func signal(pid: Int32, signal number: Int32) throws -> String? {
+        let answered = expectation(description: "signal")
+        let inbox = Inbox<String?>()
+        try proxy().signalProcess(pid: pid, signal: number) {
+            inbox.put($0)
+            answered.fulfill()
+        }
+        wait(for: [answered], timeout: 5)
+        return inbox.value ?? nil
+    }
+
+    /// Starts a child this test owns, so nothing else on the machine is ever
+    /// the target of a signal here.
+    private func startChild() throws -> Int32 {
+        let child = Process()
+        child.executableURL = URL(filePath: "/bin/sleep")
+        child.arguments = ["600"]
+        try child.run()
+        children.append(child)
+        return child.processIdentifier
+    }
+
+    func testTheSnapshotHasRowsAndNoneOfThemBelongToTheCaller() throws {
+        let rows = try snapshot()
+        XCTAssertFalse(rows.isEmpty)
+        XCTAssertFalse(rows.contains { $0.uid == geteuid() }, "the caller's own rows are the client's job")
+        // The rows the app cannot read are the point of the call: root owns
+        // most of them on any running Mac.
+        XCTAssertTrue(rows.contains { $0.uid == 0 })
+        XCTAssertTrue(rows.allSatisfy { $0.pid >= 0 })
+    }
+
+    /// The uid the client claims is only a hint; the connection decides. A
+    /// client that asked for root to be excluded still gets no row of its own.
+    func testTheClaimedUIDDoesNotChangeWhatIsExcluded() throws {
+        let rows = try snapshot(excludingUID: 0)
+        XCTAssertFalse(rows.contains { $0.uid == geteuid() })
+        XCTAssertTrue(rows.contains { $0.uid == 0 })
+    }
+
+    /// The documented first-call behaviour, and the reason the helper keeps a
+    /// sampler of its own: a CPU percent is a delta between two calls.
+    func testTheFirstSnapshotHasNoCPUPercentAndTheNextOneDoes() throws {
+        let first = try snapshot()
+        XCTAssertTrue(first.allSatisfy { $0.cpuPercent == nil }, "a first sample has nothing to compare against")
+
+        Thread.sleep(forTimeInterval: 0.5)
+        let starts = Dictionary(first.map { ($0.pid, $0.startAbsoluteTime) }, uniquingKeysWith: { first, _ in first })
+        let second = try snapshot()
+        XCTAssertFalse(second.isEmpty)
+        // Only the rows that were there the first time and gave up their
+        // counters: a process that started in between has no baseline either.
+        let comparable = second.filter { $0.cpuNanoseconds != nil && starts[$0.pid] == $0.startAbsoluteTime }
+        XCTAssertTrue(comparable.allSatisfy { $0.cpuPercent != nil })
+    }
+
+    func testLaunchdIsNeverSignalled() throws {
+        let refusal = try XCTUnwrap(try signal(pid: 1, signal: SIGTERM))
+        XCTAssertTrue(refusal.contains("launchd"), refusal)
+        // EPERM, not ESRCH: launchd is there, and a test that is not root may
+        // not signal it. Either answer means the process still exists.
+        XCTAssertTrue(kill(1, 0) == 0 || errno == EPERM, "launchd is still there")
+    }
+
+    func testTheHelperDoesNotKillItself() throws {
+        let refusal = try XCTUnwrap(try signal(pid: getpid(), signal: SIGKILL))
+        XCTAssertTrue(refusal.contains("\(getpid())"), refusal)
+    }
+
+    func testASignalOutsideTheAllowListIsRefused() throws {
+        let pid = try startChild()
+        for number: Int32 in [SIGSTOP, SIGHUP, SIGINT, 0] {
+            let refusal = try XCTUnwrap(try signal(pid: pid, signal: number), "signal \(number)")
+            XCTAssertTrue(refusal.contains("not allowed"), refusal)
+        }
+        XCTAssertEqual(kill(pid, 0), 0, "the child is untouched")
+    }
+
+    func testAChildOfTheTestIsTerminated() throws {
+        let pid = try startChild()
+        XCTAssertNil(try signal(pid: pid, signal: SIGTERM))
+
+        let gone = expectation(description: "the child ended")
+        let child = try XCTUnwrap(children.first { $0.processIdentifier == pid })
+        let poll = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { timer in
+            guard !child.isRunning else { return }
+            timer.invalidate()
+            gone.fulfill()
+        }
+        wait(for: [gone], timeout: 5)
+        poll.invalidate()
+        XCTAssertEqual(child.terminationReason, .uncaughtSignal)
     }
 }
 

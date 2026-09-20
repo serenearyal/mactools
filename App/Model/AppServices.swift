@@ -11,6 +11,7 @@ final class AppServices {
 
     let settings: AppSettings
     let store: MetricsStore
+    let processes = ProcessStore()
     let storage = StorageStore()
     let helper = HelperController()
     let fans: FanStore
@@ -28,6 +29,7 @@ final class AppServices {
             guard tab != newValue else { return }
             tab = newValue
             store.setActiveTab(newValue)
+            processes.setActiveTab(newValue)
         }
     }
 
@@ -45,5 +47,6 @@ final class AppServices {
         )
         keyboardLock = KeyboardLockController(settings: settings)
         windowController.store = store
+        windowController.processes = processes
     }
 }

@@ -166,8 +166,23 @@ enum DebugCapture {
             "memory sample: \(snapshot.memory != nil)",
             "disk io sample: \(snapshot.diskIO != nil)",
             "history cpu points: \(services.store.history.cpuTotal.count)",
+            "processes: \(services.processes.rows.count)",
+            "processes visible: \(services.processes.visibleRows.count)",
+            "processes restricted: \(services.processes.restrictedCount)",
+            "processes from the helper: \(services.processes.helperRowCount)",
+            "processes helper failure: \(services.processes.helperFailure ?? "none")",
+            "processes top cpu: \(topProcesses(services.processes))",
         ]
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// The three heaviest rows, so a capture run can check the CPU column
+    /// against what `top` says at the same moment.
+    private static func topProcesses(_ store: ProcessStore) -> String {
+        store.topByCPU
+            .prefix(3)
+            .map { "\($0.name) \($0.pid) \($0.cpuPercent.map { Fmt.processCPU($0) } ?? "-")" }
+            .joined(separator: " | ")
     }
 
     /// What the keyboard lock sees of the system: the two permissions as this

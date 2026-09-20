@@ -51,9 +51,10 @@ struct TabDetailView: View {
         case .sensors:
             SensorsView(store: services.store, settings: services.settings)
         case .processes:
-            PlaceholderTabView(
-                tab: .processes,
-                description: "The sortable process table with CPU and memory arrives in a later batch."
+            ProcessesView(
+                store: services.processes,
+                helper: services.helper,
+                showSettings: { services.selectedTab = .settings }
             )
         case .storage:
             StorageView(store: services.store, storage: services.storage)
@@ -65,19 +66,6 @@ struct TabDetailView: View {
                 store: services.store,
                 helper: services.helper
             )
-        }
-    }
-}
-
-struct PlaceholderTabView: View {
-    let tab: MainTab
-    let description: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(tab.title, systemImage: tab.symbolName)
-        } description: {
-            Text(description)
         }
     }
 }

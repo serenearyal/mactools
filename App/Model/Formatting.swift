@@ -73,6 +73,12 @@ enum Fmt {
         return "\(value.formatted(.byteCount(style: .file, allowedUnits: units, spellsOutZero: false)))/s"
     }
 
+    /// "12.3" for the process table: Activity Monitor counts one busy core as
+    /// 100, and one decimal is what tells an idle process from a sleeping one.
+    static func processCPU(_ percent: Double) -> String {
+        percent.formatted(.number.precision(.fractionLength(1)))
+    }
+
     static func percent(_ fraction: Double, fractionDigits: Int = 0) -> String {
         fraction.formatted(.percent.precision(.fractionLength(fractionDigits)))
     }

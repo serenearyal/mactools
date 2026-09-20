@@ -144,13 +144,11 @@ enum MainTab: String, CaseIterable, Identifiable, Sendable {
 final class MetricsStore {
     private(set) var snapshot = MetricsSnapshot()
     private(set) var history = MetricsHistory()
-    private(set) var processes: [ProcessInfoRow] = []
     private(set) var topology = CoreTopology.current()
 
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private let sampler = MetricsSampler()
     @ObservationIgnored private var sampleTask: Task<Void, Never>?
-    @ObservationIgnored private var processTask: Task<Void, Never>?
     @ObservationIgnored private var lastVolumeSample = Date.distantPast
     @ObservationIgnored private var asleep = false
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -160,7 +158,6 @@ final class MetricsStore {
 
     /// Disk capacity moves slowly and the scan walks every mount point.
     private static let volumeInterval: TimeInterval = 5
-    private static let processInterval: Duration = .seconds(3)
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -192,8 +189,6 @@ final class MetricsStore {
     func stop() {
         sampleTask?.cancel()
         sampleTask = nil
-        processTask?.cancel()
-        processTask = nil
         let center = NSWorkspace.shared.notificationCenter
         for observer in observers { center.removeObserver(observer) }
         observers = []
@@ -205,14 +200,12 @@ final class MetricsStore {
         guard windowVisible != visible else { return }
         windowVisible = visible
         restartSampling()
-        updateProcessSampling()
     }
 
     func setActiveTab(_ tab: MainTab) {
         guard activeTab != tab else { return }
         activeTab = tab
         restartSampling()
-        updateProcessSampling()
     }
 
     // MARK: - Cadence
@@ -221,7 +214,6 @@ final class MetricsStore {
         guard asleep != value else { return }
         asleep = value
         restartSampling()
-        updateProcessSampling()
     }
 
     /// A settings change takes effect at once instead of after the current
@@ -319,29 +311,5 @@ final class MetricsStore {
         if sample.volumes != nil { lastVolumeSample = sample.date }
         snapshot.apply(sample)
         history.append(sample, snapshot: snapshot)
-    }
-
-    // MARK: - Processes
-
-    /// The process table costs one libproc round trip per process, so it only
-    /// runs while the list is on screen.
-    private func updateProcessSampling() {
-        let wanted = windowVisible && !asleep && activeTab == .processes
-        if wanted, processTask == nil {
-            processTask = Task { @MainActor [weak self] in
-                while !Task.isCancelled {
-                    guard let self else { return }
-                    let rows = await sampler.sampleProcesses()
-                    guard !Task.isCancelled else { return }
-                    processes = rows
-                    try? await Task.sleep(for: MetricsStore.processInterval)
-                }
-            }
-        } else if !wanted, processTask != nil {
-            processTask?.cancel()
-            processTask = nil
-            processes = []
-            Task { [sampler] in await sampler.resetProcesses() }
-        }
     }
 }
