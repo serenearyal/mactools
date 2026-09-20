@@ -53,11 +53,13 @@ final class FanStore {
     @ObservationIgnored private let persistsModes: Bool
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var hasApplied = false
+    @ObservationIgnored private var pendingSends: [Int: Task<Void, Never>] = [:]
     @ObservationIgnored private let log = AppLog.fans
 
     /// While the tab is open. The helper reads the SMC for every snapshot, so
     /// this is the same cost as one line of the Sensors tab.
     private static let pollInterval: Duration = .seconds(2)
+    private static let sendDelay: Duration = .milliseconds(200)
     /// How long the quit path waits for the helper to confirm Auto.
     private static let terminationWait: DispatchTimeInterval = .seconds(1)
 
@@ -124,8 +126,22 @@ final class FanStore {
 
     // MARK: - Changing a mode
 
+    /// The choice shows in the UI at once; the helper hears about it after a
+    /// short quiet period, and only the latest choice per fan is sent. A slider
+    /// drag calls this for every step, and each send is a verified SMC write.
     func setMode(_ mode: FanMode, forFan index: Int) async {
         store(mode, forFan: index)
+        pendingSends[index]?.cancel()
+        let send = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: FanStore.sendDelay)
+            guard !Task.isCancelled, let self else { return }
+            await self.send(mode, forFan: index)
+        }
+        pendingSends[index] = send
+        await send.value
+    }
+
+    private func send(_ mode: FanMode, forFan index: Int) async {
         isBusy = true
         defer { isBusy = false }
         do {
@@ -134,6 +150,8 @@ final class FanStore {
         } catch {
             failure = error.errorDescription
             log.error("fan \(index) refused: \(error.localizedDescription, privacy: .public)")
+            // The helper put the fan back to Auto; the controls must say so.
+            if storedMode(forFan: index) == mode { store(.auto, forFan: index) }
         }
         await refresh()
     }

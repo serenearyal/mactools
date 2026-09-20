@@ -168,6 +168,9 @@ do {
             throw CLIError("'fan-set' takes a fan index and a speed, for example 'ventctl fan-set 0 2500'")
         }
         try FanCommands.setConstant(index: index, rpm: rpm)
+    case "fan-probe":
+        try withoutOptions()
+        try FanProbe.run()
     case "selftest-fans", "selftest":
         try withoutOptions()
         try FanCommands.selftest()

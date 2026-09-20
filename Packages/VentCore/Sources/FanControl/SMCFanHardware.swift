@@ -19,6 +19,8 @@ public final class SMCFanHardware: FanHardware, FanUnlockHardware, Sendable {
     /// still counts as the same value: `flt ` is a 32-bit float, and the SMC
     /// rounds.
     private static let verifyToleranceRPM: Double = 1
+    private static let verifyTimeout: Double = 1.5
+    private static let verifyInterval: Double = 0.025
 
     public var fanCount: Int { capabilities.fanCount }
     public var hasForceTargets: Bool { capabilities.hasForceTargets }
@@ -150,13 +152,21 @@ public final class SMCFanHardware: FanHardware, FanUnlockHardware, Sendable {
         } catch {
             throw FanHardwareError("cannot write \(key): \(error.description)")
         }
-        guard let readBack = try read(key) else {
-            throw FanHardwareError("key \(key) does not hold a number")
-        }
-        guard abs(readBack - value) <= SMCFanHardware.verifyToleranceRPM else {
-            throw FanHardwareError(
-                "the SMC did not take \(Int(value.rounded())) for \(key); it still reads \(Int(readBack.rounded()))"
-            )
+        // The SMC applies a write asynchronously: on the M1 Pro `F0Tg` still
+        // reads the old setpoint right after a write that did take. Poll for
+        // the new value before calling it refused.
+        let deadline = MonotonicTime.seconds + SMCFanHardware.verifyTimeout
+        while true {
+            guard let readBack = try read(key) else {
+                throw FanHardwareError("key \(key) does not hold a number")
+            }
+            if abs(readBack - value) <= SMCFanHardware.verifyToleranceRPM { return }
+            guard MonotonicTime.seconds < deadline else {
+                throw FanHardwareError(
+                    "the SMC did not take \(Int(value.rounded())) for \(key); it still reads \(Int(readBack.rounded()))"
+                )
+            }
+            Thread.sleep(forTimeInterval: SMCFanHardware.verifyInterval)
         }
     }
 }
