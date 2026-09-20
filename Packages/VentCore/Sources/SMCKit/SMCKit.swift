@@ -1,7 +1,7 @@
 /// Namespace for the Apple SMC access layer.
 ///
-/// The real implementation (ABI struct, FourCC, codecs, connection, key
-/// catalog and sensor names) arrives in a later batch.
+/// The layer is the 80-byte `SMCParamStruct`, `SMCFourCC`, the payload codecs
+/// in `SMCDataType`, `SMCConnection`, `SMCKeyCatalog` and `SensorNaming`.
 public enum SMC {
     /// Name of the IOKit service the SMC layer opens.
     public static let serviceName = "AppleSMC"

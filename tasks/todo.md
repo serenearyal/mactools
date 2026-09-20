@@ -13,7 +13,7 @@ Machine: MacBookPro18,3 (M1 Pro), macOS 26.2, Xcode 26.2, Swift 6.2.3, one valid
 
 - SMC: `IOServiceOpen("AppleSMC")`, `IOConnectCallStructMethod` selector 2, 80-byte struct.
   The key and dataType fields are the native little-endian u32 of the big-endian FourCC; the wrong order gives `0x89` on all calls.
-- 2038 SMC keys, full enumeration 0.38 s.
+- 2038 SMC keys. Index-only enumeration 0.45 s, catalog with key info 0.8 s, so load it one time and cache it. 3 keys (`BDFU`, `CH0J`, `CHLS`) refuse key info without root. `kIOReturnNotPrivileged` is `0xe00002c1`.
 - Fans: `FNum`=2, F0 1200-5779 RPM, F1 1200-6241 RPM, all RPM keys are `flt ` (LE float), mode key is uppercase `F0Md`.
 - `Ftst` is absent on M1 Pro, so manual mode is a direct `F0Md=1` write. The `Ftst` retry path stays as a fallback for other chips.
 - Temperature keys `Tp0*` (CPU), `Tg0*` (GPU), `Tm0*`, `Ts*P`, `TB0T`, `TW0P`, plus power `PSTR` are readable without root.
@@ -41,7 +41,7 @@ The main session reviews, runs the verification and commits with explicit paths 
 Each batch must end with `make build && make test` green.
 
 - [x] **B0 Skeleton:** git init, tree, `Package.swift` (tools 6.2, macOS 26, Swift 6 mode), `project.yml` (App, Helper, ventctl, integration tests), xcconfig, Makefile, `tasks/todo.md` + `tasks/lessons.md` in the project. The build fails if the signing identity is ad-hoc. Verify: app starts from `/Applications`, no Dock icon, `codesign -dvvv` shows the team and runtime flag.
-- [ ] **B1 SMC read core + ventctl:** struct with layout asserts, FourCC, codecs (`flt`, `fpe2`, `sp78`, `ui8/16/32`), connection, catalog, sensor names. Unit tests with the captured byte strings. Verify: `ventctl dump-keys | wc -l` = 2038, sensors and fans match the facts above. No writes.
+- [x] **B1 SMC read core + ventctl:** struct with layout asserts, FourCC, codecs (`flt`, `fpe2`, `sp78`, `ui8/16/32`), connection, catalog, sensor names. Unit tests with the captured byte strings. Verify: `ventctl dump-keys | wc -l` = 2038, sensors and fans match the facts above. No writes.
 - [ ] **B2 Metrics engine:** CPU (total + per core, P/E labels checked against `powermetrics`), memory, disk space, disk I/O, processes, ring buffer. Verify against Activity Monitor: CPU within 3 points, memory within 200 MB.
 - [ ] **B3 Menu bar + window:** status item, metric selection settings (persisted), Overview tab with history graphs. Verify: no flicker or width jitter, light and dark mode, app idle CPU below 1 %.
 - [ ] **B4 Helper + XPC (highest risk):** only `ping` and `readSMC` first. Both installers. Verify: `launchctl print system/com.serenearyal.vent.helper` shows euid 0, the helper relaunches on demand after a kill, an ad-hoc re-signed client is rejected.
