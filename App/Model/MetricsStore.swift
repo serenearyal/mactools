@@ -96,55 +96,24 @@ struct MetricsHistory: Sendable {
     }
 }
 
-/// Which part of the window is on screen. It decides what the sampler reads.
-enum MainTab: String, CaseIterable, Identifiable, Sendable {
-    case overview
-    case fans
-    case sensors
-    case processes
-    case storage
-    case keyboardLock
-    case settings
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .overview: "Overview"
-        case .fans: "Fans"
-        case .sensors: "Sensors"
-        case .processes: "Processes"
-        case .storage: "Storage"
-        case .keyboardLock: "Keyboard Lock"
-        case .settings: "Settings"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .overview: "square.grid.2x2"
-        case .fans: "fan"
-        case .sensors: "thermometer.medium"
-        case .processes: "list.bullet.rectangle"
-        case .storage: "internaldrive"
-        case .keyboardLock: "keyboard"
-        case .settings: "gearshape"
-        }
-    }
-}
-
-/// The one source of live numbers for the menu bar and the window.
+/// The one source of live numbers for the menu bar, the popover and the
+/// window.
 ///
 /// Sampling runs on `MetricsSampler`, an actor, so nothing touches the main
-/// thread but the finished snapshot. The cadence follows the window: the user
-/// interval while it is open, 5 s when it is closed and the menu bar shows
-/// nothing, and no sampling at all while the machine sleeps.
+/// thread but the finished snapshot. The cadence follows the demand: the user
+/// interval while the window or the popover is on screen, 5 s when neither is
+/// and the menu bar shows nothing, and no sampling at all while the machine
+/// sleeps. `SamplingPlan` holds those rules.
 @MainActor
 @Observable
 final class MetricsStore {
     private(set) var snapshot = MetricsSnapshot()
     private(set) var history = MetricsHistory()
     private(set) var topology = CoreTopology.current()
+    /// How many passes the sampler has run. Nothing draws it; the capture path
+    /// writes it, so a consumer that leaked its timer shows up as a counter
+    /// that keeps moving after everything is off screen.
+    private(set) var sampleCount = 0
 
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private let sampler = MetricsSampler()
@@ -153,8 +122,7 @@ final class MetricsStore {
     @ObservationIgnored private var asleep = false
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
-    @ObservationIgnored private var windowVisible = false
-    @ObservationIgnored private var activeTab: MainTab = .overview
+    @ObservationIgnored private var demand = SamplingDemand()
 
     /// Disk capacity moves slowly and the scan walks every mount point.
     private static let volumeInterval: TimeInterval = 5
@@ -196,15 +164,11 @@ final class MetricsStore {
 
     // MARK: - What the UI needs
 
-    func setWindowVisible(_ visible: Bool) {
-        guard windowVisible != visible else { return }
-        windowVisible = visible
-        restartSampling()
-    }
-
-    func setActiveTab(_ tab: MainTab) {
-        guard activeTab != tab else { return }
-        activeTab = tab
+    /// The window, the popover and the tab they are on, in one value. A change
+    /// takes effect on the next pass, not after the current sleep.
+    func setDemand(_ demand: SamplingDemand) {
+        guard self.demand != demand else { return }
+        self.demand = demand
         restartSampling()
     }
 
@@ -234,9 +198,11 @@ final class MetricsStore {
     }
 
     private var interval: Duration {
-        if windowVisible { return .seconds(settings.refreshInterval.seconds) }
-        if settings.menuBarMetrics.isEmpty { return .seconds(5) }
-        return .seconds(settings.refreshInterval.seconds)
+        SamplingPlan.metricsInterval(
+            demand: demand,
+            refreshSeconds: settings.refreshInterval.seconds,
+            menuBarMetrics: settings.menuBarMetrics
+        )
     }
 
     private func restartSampling() {
@@ -257,44 +223,14 @@ final class MetricsStore {
     }
 
     private func nextRequest() -> SampleRequest {
-        var request = windowVisible ? windowRequest() : menuBarRequest()
+        var request = SamplingPlan.metricsRequest(
+            demand: demand,
+            menuBarMetrics: settings.menuBarMetrics,
+            chosenSensorScope: scopeForChosenSensor(),
+            showsUnlabelledSensors: settings.showUnlabelledSensors
+        )
         if request.diskSpace, Date.now.timeIntervalSince(lastVolumeSample) < MetricsStore.volumeInterval {
             request.diskSpace = false
-        }
-        return request
-    }
-
-    private func windowRequest() -> SampleRequest {
-        var request = SampleRequest.everything
-        if activeTab == .sensors, settings.showUnlabelledSensors {
-            request.temperatures = .everything
-        }
-        return request
-    }
-
-    /// Only what the menu bar shows. CPU stays on either way: one mach call,
-    /// and it keeps the history graph continuous.
-    private func menuBarRequest() -> SampleRequest {
-        var request = SampleRequest()
-        for metric in settings.menuBarMetrics {
-            switch metric {
-            case .cpuUsage:
-                request.cpu = true
-            case .memoryUsed, .memoryPercent:
-                request.memory = true
-            case .diskUsedPercent, .diskFree:
-                request.diskSpace = true
-            case .diskIO:
-                request.diskIO = true
-            case .cpuTemperature:
-                request.temperatures = max(request.temperatures, .cpu)
-            case .sensorTemperature:
-                request.temperatures = max(request.temperatures, scopeForChosenSensor())
-            case .fanSpeed:
-                request.fans = true
-            case .systemPower:
-                request.power = max(request.power, .system)
-            }
         }
         return request
     }
@@ -308,6 +244,7 @@ final class MetricsStore {
     }
 
     private func apply(_ sample: MetricsSample) {
+        sampleCount += 1
         if sample.volumes != nil { lastVolumeSample = sample.date }
         snapshot.apply(sample)
         history.append(sample, snapshot: snapshot)

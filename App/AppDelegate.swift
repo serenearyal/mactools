@@ -32,7 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = StatusItemController(
             settings: services.settings,
             store: services.store,
-            windowController: services.windowController
+            windowController: services.windowController,
+            popoverController: MenuBarPopoverController(services: services)
         )
         statusItemController = controller
         services.statusItemController = controller
@@ -82,6 +83,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if arguments.contains("--show-window") {
             services.windowController.show()
+        }
+        // `--show-popover` opens the dropdown without a click, and keeps it
+        // open whatever else takes the front, so a capture run can photograph
+        // it. The window stays closed: that is the whole point of the popover.
+        if arguments.contains("--show-popover") {
+            // After the launch, not during it: a popover shown from
+            // `applicationDidFinishLaunching` never reaches the screen.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                services.statusItemController?.showPopover(sticky: true)
+            }
+            // `--popover-seconds <n>` closes it again, which is how a run can
+            // show that the sampling of the popover stops with it.
+            if let index = arguments.firstIndex(of: "--popover-seconds"),
+               index + 1 < arguments.count,
+               let seconds = Double(arguments[index + 1]) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+                    services.statusItemController?.closePopover()
+                }
+            }
         }
         // `--setup-checklist show|hide` draws the Overview with and without
         // the setup card for a screenshot run, and writes nothing: what the

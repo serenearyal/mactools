@@ -49,12 +49,6 @@ actor ProcessFeed {
         }
     }
 
-    /// Frees the per-process CPU baselines while the table is off screen.
-    func reset() {
-        sampler.reset()
-        nextHelperAttempt = .distantPast
-    }
-
     /// The signal path for a process this user does not own.
     func signal(_ signal: ProcessSignal, pid: Int32) async -> String? {
         do {
@@ -66,8 +60,8 @@ actor ProcessFeed {
     }
 }
 
-/// The Processes tab: the merged table, what the user filtered it down to, and
-/// the two signals the UI can send.
+/// The Processes tab and the top lists of the popover: the merged table, what
+/// the user filtered it down to, and the two signals the UI can send.
 @MainActor
 @Observable
 final class ProcessStore {
@@ -78,6 +72,8 @@ final class ProcessStore {
     private(set) var helperFailure: String?
     /// The result of the last action, for the footer.
     private(set) var message: String?
+    /// Passes since launch, for the capture path. See `MetricsStore`.
+    private(set) var sampleCount = 0
 
     var searchText = ""
     var scope: ProcessFilterScope = .all
@@ -87,15 +83,14 @@ final class ProcessStore {
     @ObservationIgnored private let feed = ProcessFeed()
     @ObservationIgnored private let names = UserNameCache.shared
     @ObservationIgnored private var task: Task<Void, Never>?
-    @ObservationIgnored private var windowVisible = false
-    @ObservationIgnored private var tabActive = false
+    @ObservationIgnored private var demand = SamplingDemand()
 
     /// The uid of this process. Its rows can be signalled without the helper.
     static let currentUID = getuid()
 
     /// Activity Monitor's own default, and slow enough that one libproc pass
     /// over 580 processes stays under a percent of a core.
-    private static let interval: Duration = .seconds(3)
+    private static let interval = SamplingPlan.processInterval
 
     // MARK: - What the table shows
 
@@ -123,23 +118,21 @@ final class ProcessStore {
 
     // MARK: - Cadence
 
-    func setWindowVisible(_ visible: Bool) {
-        guard windowVisible != visible else { return }
-        windowVisible = visible
+    func setDemand(_ demand: SamplingDemand) {
+        guard self.demand != demand else { return }
+        self.demand = demand
         updateSampling()
     }
 
-    func setActiveTab(_ tab: MainTab) {
-        let active = tab == .processes
-        guard tabActive != active else { return }
-        tabActive = active
-        updateSampling()
-    }
-
-    /// The process table costs one libproc round trip per process, so it only
-    /// runs while the tab is on screen.
+    /// The table costs one libproc round trip per process, so it only runs
+    /// while the tab or the popover is on screen.
+    ///
+    /// The rows and the CPU baselines survive a stop. They cost about 50 kB
+    /// and they buy the popover a first paint with real numbers: a kept
+    /// baseline makes the first pass after the gap an average over the gap,
+    /// where a dropped one would make it a column of dashes.
     private func updateSampling() {
-        let wanted = windowVisible && tabActive
+        let wanted = SamplingPlan.samplesProcesses(demand)
         if wanted, task == nil {
             task = Task { @MainActor [weak self] in
                 while !Task.isCancelled {
@@ -153,14 +146,11 @@ final class ProcessStore {
         } else if !wanted, task != nil {
             task?.cancel()
             task = nil
-            rows = []
-            restrictedCount = 0
-            helperRowCount = 0
-            Task { [feed] in await feed.reset() }
         }
     }
 
     private func apply(_ sample: ProcessFeed.Sample) {
+        sampleCount += 1
         rows = sample.rows.map { ProcessTableRow(info: $0, userName: names.name(for: $0.uid)) }
         restrictedCount = ProcessTable.restrictedCount(rows)
         helperRowCount = sample.helperRows

@@ -22,17 +22,47 @@ final class AppServices {
     /// Set by the app delegate once the status item exists.
     @ObservationIgnored var statusItemController: StatusItemController?
 
+    /// Observed: the sidebar reads it. The consumers next to it are not, so
+    /// opening the popover does not invalidate the window's views.
     private var tab: MainTab = .overview
+    @ObservationIgnored private var consumers: SamplingConsumers = []
 
-    /// The sidebar selection. Setting it tells the store what to sample.
+    /// The sidebar selection. Setting it tells the stores what to sample.
     var selectedTab: MainTab {
         get { tab }
         set {
             guard tab != newValue else { return }
             tab = newValue
-            store.setActiveTab(newValue)
-            processes.setActiveTab(newValue)
+            publishDemand()
         }
+    }
+
+    /// Who wants live numbers. The window and the popover each set their own
+    /// flag; the stores see one value.
+    func setWindowVisible(_ visible: Bool) {
+        setConsumer(.window, visible)
+    }
+
+    func setPopoverVisible(_ visible: Bool) {
+        setConsumer(.popover, visible)
+    }
+
+    private func setConsumer(_ consumer: SamplingConsumers, _ active: Bool) {
+        var updated = consumers
+        if active { updated.insert(consumer) } else { updated.remove(consumer) }
+        guard updated != consumers else { return }
+        consumers = updated
+        publishDemand()
+    }
+
+    private func publishDemand() {
+        let demand = SamplingDemand(consumers: consumers, activeTab: tab)
+        // Memory only, at `info` level: the line is how a sampling leak is
+        // proved afterwards, and it is of no interest otherwise.
+        AppLog.app.info("sampling demand: \(demand.summary, privacy: .public)")
+        store.setDemand(demand)
+        processes.setDemand(demand)
+        fans.setDemand(demand)
     }
 
     private init() {
@@ -52,7 +82,5 @@ final class AppServices {
         let helper = HelperController()
         self.helper = helper
         setup = SetupChecklist(settings: settings, helper: helper, lock: keyboardLock)
-        windowController.store = store
-        windowController.processes = processes
     }
 }

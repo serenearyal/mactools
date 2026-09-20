@@ -3,13 +3,14 @@ import Observation
 import SwiftUI
 
 /// The status item: a template image built from the live metrics, a left
-/// click that toggles the window and a right click that opens a small menu.
+/// click that toggles the popover and a right click that opens a small menu.
 @MainActor
 final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let settings: AppSettings
     private let store: MetricsStore
     private let windowController: MainWindowController
+    private let popoverController: MenuBarPopoverController
 
     private var lastCells: [MenuBarCell] = []
     private var lastStyle: MenuBarLabelStyle?
@@ -25,6 +26,9 @@ final class StatusItemController: NSObject {
     /// sentinel, so the button window is the only honest source.
     var itemWidth: CGFloat { statusItem.button?.window?.frame.width ?? 0 }
     var itemWindowNumber: Int { statusItem.button?.window?.windowNumber ?? 0 }
+    /// The popover, for the debug capture path.
+    var popoverWindowNumber: Int { popoverController.windowNumber }
+    var isPopoverShown: Bool { popoverController.isShown }
 
     private lazy var contextMenu: NSMenu = {
         let menu = NSMenu()
@@ -40,10 +44,16 @@ final class StatusItemController: NSObject {
         return menu
     }()
 
-    init(settings: AppSettings, store: MetricsStore, windowController: MainWindowController) {
+    init(
+        settings: AppSettings,
+        store: MetricsStore,
+        windowController: MainWindowController,
+        popoverController: MenuBarPopoverController
+    ) {
         self.settings = settings
         self.store = store
         self.windowController = windowController
+        self.popoverController = popoverController
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -52,7 +62,10 @@ final class StatusItemController: NSObject {
         if let button = statusItem.button {
             button.target = self
             button.action = #selector(handleClick)
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            // The left button acts on the press, like a menu: AppKit closes an
+            // open popover on that same press, and acting on the release would
+            // reopen what the user just dismissed.
+            button.sendAction(on: [.leftMouseDown, .rightMouseUp])
             button.imagePosition = .imageOnly
             button.setAccessibilityLabel("Vent system metrics")
         }
@@ -117,6 +130,19 @@ final class StatusItemController: NSObject {
         image.isTemplate = true
         lastImageSize = image.size
         statusItem.button?.image = image
+        // A new image clears the pressed look, and the popover is still there.
+        if popoverController.isShown { statusItem.button?.highlight(true) }
+    }
+
+    /// The `--show-popover` debug path, and the way back when the window is
+    /// hidden behind the notch.
+    func showPopover(sticky: Bool = false) {
+        guard let button = statusItem.button else { return }
+        popoverController.show(from: button, sticky: sticky)
+    }
+
+    func closePopover() {
+        popoverController.close()
     }
 
     // MARK: - Clicks
@@ -124,15 +150,17 @@ final class StatusItemController: NSObject {
     @objc private func handleClick() {
         let event = NSApp.currentEvent
         let isSecondary = event?.type == .rightMouseUp
+            || event?.type == .rightMouseDown
             || event?.modifierFlags.contains(.control) == true
         if isSecondary {
             // Handing the menu to the status item keeps the button
             // highlighted while the menu is open; a bare popUp does not.
+            popoverController.close()
             statusItem.menu = contextMenu
             statusItem.button?.performClick(nil)
             statusItem.menu = nil
-        } else {
-            windowController.toggle()
+        } else if let button = statusItem.button {
+            popoverController.toggle(from: button)
         }
     }
 

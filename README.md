@@ -5,7 +5,7 @@ It shows live metrics in the menu bar, reads every SMC sensor, controls the fans
 
 Vent is written in Swift 6 and SwiftUI, has no dependencies outside the system frameworks, and is built for one machine class: an Apple silicon Mac running macOS 26 or later.
 
-- **Menu bar.** Any of ten metrics, in the order you choose, with a fixed width so the numbers never shift.
+- **Menu bar.** Any of ten metrics, in the order you choose, with a fixed width so the numbers never shift, and a popover with the whole machine behind one click.
 - **Overview.** CPU with per-core bars, memory, disk space and throughput, temperatures, fan speeds and system power.
 - **Fans.** Auto, a constant speed, or a curve that follows a sensor, with clamps and a thermal interlock.
 - **Sensors.** All 2038 SMC keys of a MacBookPro18,3, named and grouped.
@@ -45,7 +45,8 @@ A copy that runs from the Downloads folder or from `build/` collects a second se
 Vent says so in an orange banner above every tab and changes nothing by itself: moving an app behind the user's back is worse than a line of text.
 
 Vent has no Dock icon and no menu of its own.
-The window opens with a click on the menu bar item, and closing it leaves the app running.
+A click on the menu bar item drops down a popover with the live numbers, and the window opens from the **Open Vent** button in it.
+Closing the window leaves the app running.
 
 ## First run
 
@@ -75,7 +76,28 @@ The rows refresh by themselves every time Vent comes back to the front, because 
 
 ## The menu bar item
 
-A left click opens or hides the window, a right click opens a small menu: Open Vent, Lock Keyboard, Settings, Quit Vent.
+A left click drops down the popover, a right click opens a small menu: Open Vent, Fans: Full Blast, Fans: Auto, Lock Keyboard, Settings, Quit Vent.
+A second left click, a click anywhere else or Escape closes the popover again.
+
+### The popover
+
+340 pt wide, the whole machine at a glance, and no window in sight.
+
+| Section | What it shows | What the title opens |
+|---------|---------------|----------------------|
+| CPU | Total load, a sparkline of the last minutes, a bar per core with the E and P clusters apart | Overview |
+| Memory | Used of total, the pressure dot, the app / wired / compressed / cached bar, free and swap | Overview |
+| Storage | Used of total on the boot volume, the bar, free space and the read and write throughput | Storage |
+| Thermals & Fans | Hottest CPU sensor, GPU, system power, and each fan with its mode and speed | Fans |
+| Top Processes | The three heaviest by CPU and by memory | Processes |
+
+The header has **Open Vent**, **Settings** and **Quit**; the footer has **Lock Keyboard** and **Scan Storage...**.
+**Auto** and **Full Blast** set every fan at once, and are disabled with one line of explanation while the helper is not installed.
+Every button that leads somewhere closes the popover first.
+
+While the popover is open, Vent samples exactly as it does with the window open: metrics at the refresh interval, processes every 3 s, fans every 2 s.
+It gives all of that up when the popover closes, and an idle Vent with nothing on screen is back to about 0.6 % of one core.
+The popover opens on the last numbers it had, so there is no empty frame and no jump when the first fresh sample lands.
 
 The label is a SwiftUI view rendered into a template image, so the system paints it for light and dark mode.
 Each metric gets a fixed cell width, computed from the widest string it can ever show, so the item never jitters while the numbers change.
@@ -175,7 +197,7 @@ ventctl selftest-fans           # the gentle live sequence below
 ## Keyboard lock
 
 Vent can hold the whole keyboard for a moment so you can wipe it.
-Press **Lock Keyboard** in the Keyboard Lock tab, or pick "Lock Keyboard" from the menu bar item's right-click menu.
+Press **Lock Keyboard** in the Keyboard Lock tab, in the menu bar popover, or in the menu bar item's right-click menu.
 A dark overlay covers every screen and shows the time left.
 
 ### What it blocks
@@ -302,7 +324,7 @@ The banner above the table says so and links to the right pane.
 ## Development
 
 ```
-App/                 the SwiftUI app: menu bar, window, stores, helper client, keyboard lock
+App/                 the SwiftUI app: menu bar, popover, window, stores, helper client, keyboard lock
 Helper/              the root daemon: XPC service, fan governor, power watcher, client auth
 ventctl/             the debug CLI
 Packages/VentCore/   SMCKit, FanControl, SysMetrics, ScanKit, HelperProtocol - no AppKit
@@ -341,6 +363,8 @@ They exist so a build agent can take a screenshot or drive a tab with no click, 
 open -a Vent --args --show-window --tab sensors
   --tab <name>                 open on one tab
   --show-window                open the window at launch
+  --show-popover               drop down the menu bar popover at launch, window closed
+  --popover-seconds <n>        close the popover again after n seconds
   --setup-checklist hide|show  draw the Overview with or without the setup card
   --processes-sort name        open the process table on another column
   --scan-root <path>           fill the Storage table from one folder
@@ -352,7 +376,10 @@ open -a Vent --args --show-window --tab sensors
   --capture-quit               quit when the capture is done
 ```
 
-The capture path writes a status file with the window number, so a screenshot of the real window is `screencapture -x -o -l <number>`.
+The capture path writes a status file with the window numbers of the window and of the popover, so a screenshot of either is `screencapture -x -o -l <number>`.
+It also renders the popover with `ImageRenderer` into `popover-<appearance>.png`, which needs no Screen Recording grant at all.
+That render is the only way to see the popover in the other appearance: the real one is built against the menu bar and follows the system, whatever `--appearance` says.
+The same file counts the samples of the three stores, so a popover that left a timer running is one `grep` away.
 
 ### Logging
 

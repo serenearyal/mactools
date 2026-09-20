@@ -41,6 +41,11 @@ enum DebugCapture {
                 dark: suffix == "dark",
                 to: base.appending(path: "detail-\(tab)-\(suffix).png")
             )
+            capturePopover(
+                services: services,
+                dark: suffix == "dark",
+                to: base.appending(path: "popover-\(suffix).png")
+            )
             writeStatus(
                 services: services,
                 to: base.appending(path: "status-\(tab)-\(suffix).txt")
@@ -145,6 +150,28 @@ enum DebugCapture {
         write(NSBitmapImageRep(cgImage: image), to: url)
     }
 
+    /// The popover content on its own, drawn by `ImageRenderer` on the
+    /// material the real popover sits on.
+    ///
+    /// `screencapture -l <window number>` photographs the real thing, and the
+    /// status file names that window; this is the path that needs no Screen
+    /// Recording grant. The content is pure SwiftUI with no scroll view for
+    /// exactly this reason.
+    ///
+    /// It is also the only way to see the popover in the appearance it does
+    /// not have: the real one is built against the menu bar and follows the
+    /// system, whatever `--appearance` says.
+    private static func capturePopover(services: AppServices, dark: Bool, to url: URL) {
+        let content = MenuBarPopoverView(services: services)
+            .padding(.vertical, 2)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .environment(\.colorScheme, dark ? .dark : .light)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        guard let image = renderer.cgImage else { return }
+        write(NSBitmapImageRep(cgImage: image), to: url)
+    }
+
     /// What the window and the app are doing, since a build agent cannot see
     /// the screen.
     private static func writeStatus(services: AppServices, to url: URL) {
@@ -174,6 +201,9 @@ enum DebugCapture {
             "status item width: \(String(format: "%.1f", services.statusItemController?.itemWidth ?? 0)) pt",
             "status item image: \(services.statusItemController?.lastImageSize ?? .zero)",
             "status item window number: \(services.statusItemController?.itemWindowNumber ?? 0)",
+            "popover shown: \(services.statusItemController?.isPopoverShown ?? false)",
+            // `screencapture -x -o -l <n>` photographs the real popover.
+            "popover window number: \(services.statusItemController?.popoverWindowNumber ?? 0)",
             "window number: \(window?.windowNumber ?? 0)",
             "app active: \(NSApp.isActive)",
             "activation policy: \(NSApp.activationPolicy().rawValue)",
@@ -199,6 +229,10 @@ enum DebugCapture {
             "processes from the helper: \(services.processes.helperRowCount)",
             "processes helper failure: \(services.processes.helperFailure ?? "none")",
             "processes top cpu: \(topProcesses(services.processes))",
+            // The leak check: with nothing on screen these three stop moving.
+            "metrics samples: \(services.store.sampleCount)",
+            "process samples: \(services.processes.sampleCount)",
+            "fan polls: \(services.fans.pollCount)",
         ]
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
     }

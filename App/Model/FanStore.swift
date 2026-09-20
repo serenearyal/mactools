@@ -43,6 +43,8 @@ final class FanStore {
     /// The last thing that went wrong, for the banner.
     private(set) var failure: String?
     private(set) var isBusy = false
+    /// Polls since launch, for the capture path. See `MetricsStore`.
+    private(set) var pollCount = 0
 
     /// Only used by the `--fake-fans` path, which must not write the user's
     /// real fan configuration while it draws a screenshot.
@@ -52,13 +54,15 @@ final class FanStore {
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private let persistsModes: Bool
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private var demand = SamplingDemand()
     @ObservationIgnored private var hasApplied = false
     @ObservationIgnored private var pendingSends: [Int: Task<Void, Never>] = [:]
     @ObservationIgnored private let log = AppLog.fans
 
-    /// While the tab is open. The helper reads the SMC for every snapshot, so
-    /// this is the same cost as one line of the Sensors tab.
-    private static let pollInterval: Duration = .seconds(2)
+    /// While the tab or the popover is open. The helper reads the SMC for
+    /// every snapshot, so this is the same cost as one line of the Sensors
+    /// tab.
+    private static let pollInterval = SamplingPlan.fanInterval
     private static let sendDelay: Duration = .milliseconds(200)
     /// How long the quit path waits for the helper to confirm Auto.
     private static let terminationWait: DispatchTimeInterval = .seconds(1)
@@ -90,23 +94,32 @@ final class FanStore {
 
     // MARK: - Polling
 
-    func startPolling() {
-        guard pollTask == nil else { return }
-        pollTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                await refresh()
-                try? await Task.sleep(for: FanStore.pollInterval)
+    /// Polling follows the demand, not the lifetime of the Fans view: a window
+    /// that is ordered out keeps its SwiftUI views alive, and this is what
+    /// stops the XPC round trips when nobody can see them.
+    ///
+    /// The last snapshot is kept when polling stops, so the popover opens on
+    /// the fan speeds of a moment ago instead of on dashes.
+    func setDemand(_ demand: SamplingDemand) {
+        guard self.demand != demand else { return }
+        self.demand = demand
+        let wanted = SamplingPlan.pollsFans(demand)
+        if wanted, pollTask == nil {
+            pollTask = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    guard let self else { return }
+                    await refresh()
+                    try? await Task.sleep(for: FanStore.pollInterval)
+                }
             }
+        } else if !wanted {
+            pollTask?.cancel()
+            pollTask = nil
         }
     }
 
-    func stopPolling() {
-        pollTask?.cancel()
-        pollTask = nil
-    }
-
     func refresh() async {
+        pollCount += 1
         do {
             let fresh = try await backend.snapshot()
             let reconnected = snapshot == nil

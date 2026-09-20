@@ -21,11 +21,10 @@ struct FansView: View {
             showSettings: showSettings,
             scrolls: true
         )
-        .task {
-            await helper.refresh()
-            fans.startPolling()
-        }
-        .onDisappear { fans.stopPolling() }
+        // Polling itself follows the sampling demand, which knows whether the
+        // window is really on screen; the tab only has to ask the helper for
+        // its state once.
+        .task { await helper.refresh() }
     }
 }
 

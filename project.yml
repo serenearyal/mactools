@@ -138,6 +138,14 @@ targets:
       # checked without registering anything with launchd.
       - App/Model/LaunchAtLogin.swift
       - App/Model/AppLog.swift
+      # What the window, the popover and the menu bar ask the stores to
+      # sample. Pure rules over the request types next to them. `AppSettings`
+      # itself stays out: an `@Observable` class in this bundle makes the
+      # linker pull SwiftUICore, which a unit-test bundle may not link.
+      - App/Model/SamplingPlan.swift
+      - App/Model/MainTab.swift
+      - App/Model/MetricsSample.swift
+      - App/Model/MenuBarMetric.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.integration-tests

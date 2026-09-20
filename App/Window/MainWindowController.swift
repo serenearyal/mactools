@@ -14,9 +14,6 @@ final class MainWindowController {
     static let windowID = "main"
     static let frameAutosaveName = "VentMainWindow"
 
-    weak var store: MetricsStore?
-    weak var processes: ProcessStore?
-
     private weak var window: NSWindow?
     private var openAction: (() -> Void)?
     private var observers: [NSObjectProtocol] = []
@@ -112,8 +109,7 @@ final class MainWindowController {
             && (window?.isVisible ?? false)
             && !(window?.isMiniaturized ?? false)
             && (window?.occlusionState.contains(.visible) ?? false)
-        store?.setWindowVisible(visible)
-        processes?.setWindowVisible(visible)
+        AppServices.shared.setWindowVisible(visible)
     }
 }
 
