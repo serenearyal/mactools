@@ -10,6 +10,10 @@ let package = Package(
         .library(name: "SysMetrics", targets: ["SysMetrics"]),
         .library(name: "ScanKit", targets: ["ScanKit"]),
         .library(name: "HelperProtocol", targets: ["HelperProtocol"]),
+        .library(name: "WindowKit", targets: ["WindowKit"]),
+        .library(name: "ReportKit", targets: ["ReportKit"]),
+        .library(name: "AwakeKit", targets: ["AwakeKit"]),
+        .library(name: "BacklightKit", targets: ["BacklightKit"]),
     ],
     targets: [
         .target(name: "SMCKit"),
@@ -17,9 +21,16 @@ let package = Package(
         .target(name: "SysMetrics"),
         .target(name: "ScanKit"),
         .target(name: "HelperProtocol"),
+        .target(name: "WindowKit"),
+        .target(name: "ReportKit"),
+        .target(name: "AwakeKit"),
+        .target(name: "BacklightKit"),
         .testTarget(
             name: "VentCoreTests",
-            dependencies: ["SMCKit", "FanControl", "SysMetrics", "ScanKit", "HelperProtocol"]
+            dependencies: [
+                "SMCKit", "FanControl", "SysMetrics", "ScanKit", "HelperProtocol",
+                "WindowKit", "ReportKit", "AwakeKit", "BacklightKit",
+            ]
         ),
     ]
 )
