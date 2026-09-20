@@ -1,0 +1,26 @@
+// Shared build settings for every Vent target.
+// Machine-specific overrides go in Config/local.xcconfig, which is gitignored.
+
+DEVELOPMENT_TEAM = M9Q5YCJ5NU
+MACOSX_DEPLOYMENT_TARGET = 26.0
+SWIFT_VERSION = 6.0
+SWIFT_STRICT_CONCURRENCY = complete
+
+// Manual signing with the one Apple Development identity on this machine.
+// A macOS app that is not sandboxed and claims no restricted entitlement
+// needs no provisioning profile.
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = Apple Development
+PROVISIONING_PROFILE_SPECIFIER =
+
+ENABLE_HARDENED_RUNTIME = YES
+ENABLE_APP_SANDBOX = NO
+ENABLE_USER_SCRIPT_SANDBOXING = YES
+
+ONLY_ACTIVE_ARCH = YES
+DEAD_CODE_STRIPPING = YES
+CLANG_ENABLE_OBJC_ARC = YES
+SWIFT_TREAT_WARNINGS_AS_ERRORS = NO
+GCC_TREAT_WARNINGS_AS_ERRORS = NO
+
+#include? "local.xcconfig"

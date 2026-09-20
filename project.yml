@@ -1,0 +1,157 @@
+name: Vent
+
+options:
+  bundleIdPrefix: com.serenearyal
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "26.0"
+  groupSortPosition: top
+  minimumXcodeGenVersion: "2.42.0"
+
+configFiles:
+  Debug: Config/Shared.xcconfig
+  Release: Config/Shared.xcconfig
+
+packages:
+  VentCore:
+    path: Packages/VentCore
+
+targetTemplates:
+  CommandLineTool:
+    type: tool
+    platform: macOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: YES
+
+targets:
+  Vent:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+        excludes:
+          - "Vent.entitlements"
+          - "Resources/LaunchDaemons/**"
+      # SMAppService.daemon requires the plist at this exact path, not in Resources.
+      - path: App/Resources/LaunchDaemons/com.serenearyal.vent.helper.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchDaemons
+    settings:
+      base:
+        PRODUCT_NAME: Vent
+        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent
+        CODE_SIGN_ENTITLEMENTS: App/Vent.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        INFOPLIST_KEY_CFBundleDisplayName: Vent
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        COMBINE_HIDPI_IMAGES: YES
+    dependencies:
+      - package: VentCore
+        products:
+          - SMCKit
+          - FanControl
+          - SysMetrics
+          - ScanKit
+          - HelperProtocol
+      - target: VentHelper
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: executables
+    # Order matters: the helper must land in Contents/MacOS before the app is signed.
+    preBuildScripts:
+      - script: '"$SRCROOT/scripts/check_signing.sh"'
+        name: Reject ad-hoc signing
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/scripts/check_signing.sh
+
+  VentHelper:
+    templates:
+      - CommandLineTool
+    sources:
+      - Helper
+    settings:
+      base:
+        PRODUCT_NAME: VentHelper
+        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.helper
+        INFOPLIST_KEY_CFBundleIdentifier: com.serenearyal.vent.helper
+    dependencies:
+      - package: VentCore
+        products:
+          - SMCKit
+          - FanControl
+          - SysMetrics
+          - HelperProtocol
+
+  ventctl:
+    templates:
+      - CommandLineTool
+    sources:
+      - ventctl
+    settings:
+      base:
+        PRODUCT_NAME: ventctl
+        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.ventctl
+    dependencies:
+      - package: VentCore
+        products:
+          - SMCKit
+          - FanControl
+          - SysMetrics
+          - ScanKit
+          - HelperProtocol
+
+  VentIntegrationTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/VentIntegrationTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.integration-tests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: VentCore
+        products:
+          - SMCKit
+          - FanControl
+          - SysMetrics
+          - ScanKit
+          - HelperProtocol
+
+schemes:
+  Vent:
+    build:
+      targets:
+        Vent: all
+        ventctl: all
+        VentIntegrationTests: [test]
+    run:
+      config: Debug
+      executable: Vent
+    test:
+      config: Debug
+      targets:
+        - VentIntegrationTests
+    archive:
+      config: Release
+
+  ventctl:
+    build:
+      targets:
+        ventctl: all
+    run:
+      config: Debug
+      executable: ventctl
