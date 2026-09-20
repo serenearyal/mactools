@@ -87,7 +87,7 @@ Your actions that I cannot do: admin password / Login Items approval for the hel
 - Helper installation with `SMAppService` and the Apple Development certificate, or the legacy fallback.
 - All fan writes on real hardware: `ventctl selftest-fans`, the `kill -9` restore, helper SIGTERM, sleep/wake, curve under load, reboot.
 - Helper-backed process rows and Force Quit of a root-owned process.
-- A live keyboard lock (Accessibility and Input Monitoring are not granted).
+- A live keyboard lock (Accessibility is granted, as the round 2 probe showed. Input Monitoring is not granted, and the live check on the real keyboard is still open).
 - A storage scan from the app with Full Disk Access.
 - Launch at login registration.
 - The crash matrix in the README.

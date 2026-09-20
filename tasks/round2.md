@@ -65,11 +65,11 @@ Everything that touches AX, Carbon, `dlopen` or IOKit power stays in `App/`.
 
 ## Batches (each to `ldd:ldd-builder`; main session reviews real screenshots and commits)
 
-- [ ] **R1 Shell + IA:** popover 400 pt with tabs (Windows and Tools rows as stubs), sectioned sidebar with the 3 new tabs, Hide to Menu Bar button, first-close tip, Show Dock icon setting, per-tab `SamplingPlan`. Key files: `App/MenuBar/MenuBarPopoverView.swift` (split into shell + sections), `MenuBarPopoverController.swift`, `App/Model/MainTab.swift`, `SamplingPlan.swift`, `App/Views/MainWindowView.swift`, `Settings.swift`, `AppDelegate.swift`.
-- [ ] **R2 Copy for AI:** `ReportKit` + golden tests, `ventctl report`, toolbar menus, context menus, popover and status menu entries. Reuse `Fmt` (`App/Model/Formatting.swift`), `ProcessStore`, `StorageStore`, `ProcessTable`.
-- [ ] **R3 Keep Awake:** `AwakeKit`, controller, tab, popover row, header state, quit-path release, `ventctl awake`.
-- [ ] **R4 Keyboard Backlight:** `BacklightKit`, client, tab, popover row, `ventctl backlight`, Release-build gate (no library-validation entitlement).
-- [ ] **R5 Window geometry:** `WindowKit` with about 120 pure tests. No system calls.
+- [x] **R1 Shell + IA:** popover 400 pt with tabs (Windows and Tools rows as stubs), sectioned sidebar with the 3 new tabs, Hide to Menu Bar button, first-close tip, Show Dock icon setting, per-tab `SamplingPlan`. Key files: `App/MenuBar/MenuBarPopoverView.swift` (split into shell + sections), `MenuBarPopoverController.swift`, `App/Model/MainTab.swift`, `SamplingPlan.swift`, `App/Views/MainWindowView.swift`, `Settings.swift`, `AppDelegate.swift`.
+- [x] **R2 Copy for AI:** `ReportKit` + golden tests, `ventctl report`, toolbar menus, context menus, popover and status menu entries. Reuse `Fmt` (`App/Model/Formatting.swift`), `ProcessStore`, `StorageStore`, `ProcessTable`.
+- [x] **R3 Keep Awake:** `AwakeKit`, controller, tab, popover row, header state, quit-path release, `ventctl awake`.
+- [x] **R4 Keyboard Backlight:** `BacklightKit`, client, tab, popover row, `ventctl backlight`, Release-build gate (no library-validation entitlement).
+- [x] **R5 Window geometry:** `WindowKit` with about 120 pure tests. No system calls.
 - [x] **R6 AX mover + hotkeys:** `App/Windows/*`, conflict detection, `ventctl window list`, Debug-only bundled `VentAXProbe` app for integration tests (never a user window).
 - [x] **R7 Windows UI:** shared `WindowTileGrid` for the popover and the tab, shortcut table with set picker and per-binding status, gap slider.
 - [ ] **R8 Efficiency:** the measures above, `scripts/measure_idle.sh`, budgets green in Release.
