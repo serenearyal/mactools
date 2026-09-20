@@ -34,6 +34,36 @@ enum LockEventMask {
     }
 }
 
+// MARK: - Permissions
+
+/// The three permissions that decide whether a lock can start.
+struct LockPermissions: Equatable {
+    var accessibility = false
+    var inputMonitoring = false
+    /// True while another app holds Secure Keyboard Entry. No tap sees a key
+    /// then, so the lock would be a lie.
+    var secureInputEnabled = false
+
+    var canLock: Bool { accessibility && inputMonitoring && !secureInputEnabled }
+}
+
+// MARK: - Recovering from a refusal
+
+/// What a fresh permission read means for a lock that was refused.
+///
+/// The three permissions are granted in System Settings, outside the app, and
+/// the controller re-reads them on every activation. Without this rule the
+/// refusal stayed on screen for the rest of the session: the user granted what
+/// was missing, came back, and the tab still said Vent could not hold the
+/// keyboard.
+enum LockRecovery {
+    /// True when a refused lock may be offered again: the state is a failure
+    /// and every permission it needs is now there.
+    static func clearsFailure(isFailed: Bool, permissions: LockPermissions) -> Bool {
+        isFailed && permissions.canLock
+    }
+}
+
 // MARK: - Escape chord
 
 /// Three Escape key-downs inside a sliding 2 s window.

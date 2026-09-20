@@ -30,6 +30,12 @@ actor ProcessFeed {
 
     func sample() async -> Sample {
         let local = (try? sampler.sample()) ?? []
+        // An installed helper of another build would answer this call by
+        // dropping the connection, so it is not called at all.
+        if let blocked = HelperGate.shared.blockedReason {
+            lastFailure = blocked
+            return Sample(rows: local, helperRows: 0, helperFailure: blocked)
+        }
         guard Date.now >= nextHelperAttempt else {
             return Sample(rows: local, helperRows: 0, helperFailure: lastFailure)
         }
@@ -51,6 +57,7 @@ actor ProcessFeed {
 
     /// The signal path for a process this user does not own.
     func signal(_ signal: ProcessSignal, pid: Int32) async -> String? {
+        if let blocked = HelperGate.shared.blockedReason { return blocked }
         do {
             try await helper.signalProcess(pid: pid, signal: signal)
             return nil

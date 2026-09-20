@@ -22,6 +22,12 @@ struct SamplingConsumers: OptionSet, Sendable, Hashable {
 struct SamplingDemand: Equatable, Sendable {
     var consumers: SamplingConsumers = []
     var activeTab: MainTab = .overview
+    /// The window is on screen but another window covers it completely.
+    ///
+    /// It is not the same as hidden: the user can bring it back with one
+    /// click, and it must show the history of the minutes it was covered
+    /// rather than a gap. So it slows the sampling down and nothing else.
+    var windowOccluded = false
 
     var wantsWindow: Bool { consumers.contains(.window) }
     var wantsPopover: Bool { consumers.contains(.popover) }
@@ -33,7 +39,7 @@ struct SamplingDemand: Equatable, Sendable {
     /// One line for the log, so a sampling leak can be read back afterwards.
     var summary: String {
         var names: [String] = []
-        if wantsWindow { names.append("window(\(activeTab.rawValue))") }
+        if wantsWindow { names.append("window(\(activeTab.rawValue))\(windowOccluded ? " covered" : "")") }
         if wantsPopover { names.append("popover") }
         return names.isEmpty ? "menu bar only" : names.joined(separator: " + ")
     }
@@ -122,16 +128,20 @@ enum SamplingPlan {
     }
 
     /// The user's refresh interval while anything is on screen, 5 s for an
-    /// idle app whose label shows nothing.
+    /// idle app whose label shows nothing and for a window nobody can see.
+    ///
+    /// A covered window keeps its full request, so the graphs stay continuous
+    /// and nothing is cleared; only the cadence drops.
     static func metricsInterval(
         demand: SamplingDemand,
         refreshSeconds: Double,
         menuBarMetrics: [MenuBarMetric]
     ) -> Duration {
-        guard demand.consumers.isEmpty, menuBarMetrics.isEmpty else {
-            return .seconds(refreshSeconds)
+        if demand.wantsPopover { return .seconds(refreshSeconds) }
+        if demand.wantsWindow {
+            return demand.windowOccluded ? idleInterval : .seconds(refreshSeconds)
         }
-        return idleInterval
+        return menuBarMetrics.isEmpty ? idleInterval : .seconds(refreshSeconds)
     }
 
     /// The process table costs one libproc round trip per process, so it only

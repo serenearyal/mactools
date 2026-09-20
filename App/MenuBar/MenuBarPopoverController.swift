@@ -20,6 +20,9 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
     /// second half of that dismissal, not a new one.
     private var lastClose = Date.distantPast
     private static let reopenGuard: TimeInterval = 0.3
+    /// `--no-activate`. A capture run shows the popover without taking the
+    /// front from whatever the user is doing.
+    private var activates = true
 
     var isShown: Bool { popover.isShown }
 
@@ -41,6 +44,10 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
     }
 
     // MARK: - Showing
+
+    func suppressActivation() {
+        activates = false
+    }
 
     func toggle(from button: NSStatusBarButton) {
         if isShown {
@@ -70,9 +77,11 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
         // An accessory app is not active, and a popover of an inactive app
         // gets no key events and does not always appear at all. This opens no
         // window: `NSApp.activate()` only touches windows already on screen.
-        NSApp.activate()
+        // It is also the one thing `--no-activate` must not do.
+        if activates { NSApp.activate() }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKey()
+        // `makeKey` is the other half of taking the front, so it goes with it.
+        if activates { popover.contentViewController?.view.window?.makeKey() }
         if !sticky { watchForEscape() }
     }
 

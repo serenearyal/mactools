@@ -81,6 +81,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 services.selectedTab = tab
             }
         }
+        // `--no-activate` first of all: every path below that shows something
+        // must obey it, so a capture run never takes the front from the user.
+        if arguments.contains("--no-activate") {
+            services.windowController.suppressActivation()
+            services.statusItemController?.suppressActivation()
+        }
+        // `--window-size 760x480` before `--show-window`, so the window is
+        // built at the size a capture run asked for instead of resizing on
+        // screen. 760 x 480 is the minimum the layout allows.
+        if let index = arguments.firstIndex(of: "--window-size"), index + 1 < arguments.count,
+           let size = parseSize(arguments[index + 1]) {
+            services.windowController.forceContentSize(size)
+        }
         if arguments.contains("--show-window") {
             services.windowController.show()
         }
@@ -139,5 +152,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         DebugFanBackend.applyLaunchArguments(arguments, to: services.fans)
         DebugCapture.run(arguments: arguments, services: services)
+    }
+
+    /// `760x480`, the only format `--window-size` takes.
+    private func parseSize(_ text: String) -> CGSize? {
+        let parts = text.lowercased().split(separator: "x")
+        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1]),
+              width > 0, height > 0
+        else { return nil }
+        return CGSize(width: width, height: height)
     }
 }

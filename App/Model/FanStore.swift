@@ -14,19 +14,31 @@ protocol FanBackend: Sendable {
 }
 
 /// The real one: XPC to the privileged helper.
+///
+/// Every call goes through the version gate first. An installed helper of
+/// another build answers `ping` and then drops the connection on the first
+/// method it does not export, so calling it at all would replace a clear
+/// "reinstall it" with "The helper stopped while it was answering".
 struct HelperFanBackend: FanBackend {
     private let connection = HelperConnection()
 
     func snapshot() async throws(HelperConnectionError) -> FanSnapshot {
-        try await connection.fanSnapshot()
+        try checkVersion()
+        return try await connection.fanSnapshot()
     }
 
     func setMode(_ mode: FanMode, forFan index: Int) async throws(HelperConnectionError) {
+        try checkVersion()
         try await connection.setFanMode(mode, forFan: index)
     }
 
     func restoreAllAuto() async throws(HelperConnectionError) {
+        try checkVersion()
         try await connection.restoreAllAuto()
+    }
+
+    private func checkVersion() throws(HelperConnectionError) {
+        if let reason = HelperGate.shared.blockedReason { throw .refused(reason) }
     }
 }
 
@@ -40,8 +52,16 @@ struct HelperFanBackend: FanBackend {
 @Observable
 final class FanStore {
     private(set) var snapshot: FanSnapshot?
-    /// The last thing that went wrong, for the banner.
+    /// The last thing that went wrong while reading, for the banner. Every
+    /// refresh overwrites it, including with nil.
     private(set) var failure: String?
+    /// Why the last command was refused, kept until the next command works.
+    ///
+    /// Separate from `failure` on purpose: a refused write used to be written
+    /// there and the poll two lines later replaced it with the read error of a
+    /// perfectly healthy snapshot, which is nil, so the user saw nothing at
+    /// all. Nothing but a command touches this.
+    private(set) var lastCommandFailure: String?
     private(set) var isBusy = false
     /// Polls since launch, for the capture path. See `MetricsStore`.
     private(set) var pollCount = 0
@@ -159,14 +179,19 @@ final class FanStore {
         defer { isBusy = false }
         do {
             try await backend.setMode(mode, forFan: index)
-            failure = nil
+            lastCommandFailure = nil
         } catch {
-            failure = error.errorDescription
+            lastCommandFailure = error.errorDescription
             log.error("fan \(index) refused: \(error.localizedDescription, privacy: .public)")
             // The helper put the fan back to Auto; the controls must say so.
             if storedMode(forFan: index) == mode { store(.auto, forFan: index) }
         }
         await refresh()
+    }
+
+    /// The banner's dismiss button. The next refused command brings it back.
+    func clearCommandFailure() {
+        lastCommandFailure = nil
     }
 
     /// Every fan at its maximum, as a constant setpoint.
@@ -186,9 +211,10 @@ final class FanStore {
         defer { isBusy = false }
         do {
             try await backend.restoreAllAuto()
-            failure = nil
+            lastCommandFailure = nil
         } catch {
-            failure = error.errorDescription
+            lastCommandFailure = error.errorDescription
+            log.error("restoring Auto was refused: \(error.localizedDescription, privacy: .public)")
         }
         await refresh()
     }
@@ -214,8 +240,13 @@ final class FanStore {
 
     // MARK: - Re-applying what the user chose
 
+    /// Writes the stored mode of every fan that is not already on it.
+    ///
+    /// One fan that refuses must not cost the others theirs, so the loop runs
+    /// to the end and collects what failed, and `hasApplied` is only set when
+    /// every fan took its mode: anything less is retried on the next poll.
     private func applyStoredModes(to snapshot: FanSnapshot) async {
-        hasApplied = true
+        var failures: [(fan: Int, reason: String)] = []
         for fan in snapshot.fans {
             let stored = storedMode(forFan: fan.index)
             guard stored != fan.mode else { continue }
@@ -223,10 +254,27 @@ final class FanStore {
             do {
                 try await backend.setMode(stored, forFan: fan.index)
             } catch {
-                failure = error.errorDescription
-                return
+                log.error(
+                    "fan \(fan.index) refused the stored mode: \(error.localizedDescription, privacy: .public)"
+                )
+                failures.append((fan.index, error.errorDescription ?? "the helper refused it"))
             }
         }
+        hasApplied = failures.isEmpty
+        if !failures.isEmpty {
+            lastCommandFailure = FanStore.summary(of: failures)
+        }
         if let fresh = try? await backend.snapshot() { self.snapshot = fresh }
+    }
+
+    /// Every fan usually fails for the same reason, and repeating a sentence
+    /// per fan makes a banner nobody reads.
+    private static func summary(of failures: [(fan: Int, reason: String)]) -> String {
+        let fans = failures.map { "Fan \($0.fan + 1)" }.joined(separator: ", ")
+        let reasons = Set(failures.map(\.reason))
+        guard reasons.count == 1, let reason = reasons.first else {
+            return failures.map { "Fan \($0.fan + 1): \($0.reason)" }.joined(separator: " · ")
+        }
+        return "\(fans): \(reason)"
     }
 }

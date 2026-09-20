@@ -26,6 +26,7 @@ final class AppServices {
     /// opening the popover does not invalidate the window's views.
     private var tab: MainTab = .overview
     @ObservationIgnored private var consumers: SamplingConsumers = []
+    @ObservationIgnored private var windowOccluded = false
 
     /// The sidebar selection. Setting it tells the stores what to sample.
     var selectedTab: MainTab {
@@ -39,24 +40,35 @@ final class AppServices {
 
     /// Who wants live numbers. The window and the popover each set their own
     /// flag; the stores see one value.
-    func setWindowVisible(_ visible: Bool) {
-        setConsumer(.window, visible)
+    ///
+    /// A window that is covered by another window is still a consumer: it is
+    /// one click away and it must not come back to a gap in its graphs. The
+    /// occlusion only slows the cadence down.
+    func setWindowVisible(_ visible: Bool, occluded: Bool = false) {
+        let covered = visible && occluded
+        guard windowOccluded != covered || consumers.contains(.window) != visible else { return }
+        windowOccluded = covered
+        setConsumer(.window, visible, force: true)
     }
 
     func setPopoverVisible(_ visible: Bool) {
         setConsumer(.popover, visible)
     }
 
-    private func setConsumer(_ consumer: SamplingConsumers, _ active: Bool) {
+    private func setConsumer(_ consumer: SamplingConsumers, _ active: Bool, force: Bool = false) {
         var updated = consumers
         if active { updated.insert(consumer) } else { updated.remove(consumer) }
-        guard updated != consumers else { return }
+        guard force || updated != consumers else { return }
         consumers = updated
         publishDemand()
     }
 
     private func publishDemand() {
-        let demand = SamplingDemand(consumers: consumers, activeTab: tab)
+        let demand = SamplingDemand(
+            consumers: consumers,
+            activeTab: tab,
+            windowOccluded: windowOccluded
+        )
         // Memory only, at `info` level: the line is how a sampling leak is
         // proved afterwards, and it is of no interest otherwise.
         AppLog.app.info("sampling demand: \(demand.summary, privacy: .public)")

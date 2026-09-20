@@ -14,6 +14,11 @@ enum TemperatureScope: Sendable, Equatable, Comparable {
     case labelled
     /// Every `flt ` key with a "T" prefix, which needs the catalog.
     case everything
+
+    /// True for a pass that reads every sensor of its own set. Only such a
+    /// pass may say that a sensor it did not read is gone; the two narrow
+    /// scopes read what the menu bar asked for and nothing else.
+    var namesEverySensor: Bool { self == .labelled || self == .everything }
 }
 
 enum PowerScope: Sendable, Equatable, Comparable {
@@ -57,6 +62,9 @@ struct MetricsSample: Sendable {
     var volumes: [VolumeInfo]?
     var diskIO: DiskIORates?
     var temperatures: [TemperatureReading]?
+    /// Which sensors this pass asked for. The history needs it to tell a full
+    /// pass, which names every sensor that answers, from a narrow one.
+    var temperatureScope: TemperatureScope = .none
     var fans: [FanReading]?
     var power: [PowerReading]?
     /// nil while the SMC connection has not been tried, false when it failed.

@@ -28,17 +28,6 @@ enum UnlockReason: String {
     case screenLocked
 }
 
-/// The three permissions that decide whether a lock can start.
-struct LockPermissions: Equatable {
-    var accessibility = false
-    var inputMonitoring = false
-    /// True while another app holds Secure Keyboard Entry. No tap sees a key
-    /// then, so the lock would be a lie.
-    var secureInputEnabled = false
-
-    var canLock: Bool { accessibility && inputMonitoring && !secureInputEnabled }
-}
-
 /// Locks the keyboard for cleaning and, above all, always unlocks it again.
 ///
 /// Every path that can end a lock is here: the hold button, the Escape chord,
@@ -81,7 +70,18 @@ final class KeyboardLockController {
             inputMonitoring: CGPreflightListenEventAccess(),
             secureInputEnabled: IsSecureEventInputEnabled()
         )
+        // The user went to System Settings, granted what was missing and came
+        // back: the refusal is over. `lastFailure` stays, so the tab can still
+        // say what happened, but the lock is offered again.
+        if LockRecovery.clearsFailure(isFailed: isFailed, permissions: permissions) {
+            state = .idle
+        }
         return permissions
+    }
+
+    private var isFailed: Bool {
+        if case .failed = state { return true }
+        return false
     }
 
     /// Shows the system prompt. macOS only shows it once per app version, so

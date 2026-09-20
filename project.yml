@@ -131,8 +131,9 @@ targets:
       # tests lint and compile what it builds.
       - App/Helper/HelperInstalling.swift
       - App/Helper/LegacyHelperInstaller.swift
-      # The rules that decide when the keyboard comes back. Pure Swift with
-      # no AppKit, so the tests share the app's copy instead of a rewrite.
+      # The rules that decide when the keyboard comes back, and the three
+      # permissions they read. Pure Swift with no AppKit, so the tests share
+      # the app's copy instead of a rewrite.
       - App/KeyboardLock/KeyboardLockPolicy.swift
       # The login-item status mapping, so the launch-at-login toggle can be
       # checked without registering anything with launchd.
@@ -146,6 +147,10 @@ targets:
       - App/Model/MainTab.swift
       - App/Model/MetricsSample.swift
       - App/Model/MenuBarMetric.swift
+      # The graph and sensor history: which traces a pass adds and which one
+      # it removes. A struct over values, in its own file away from the
+      # `@Observable` store, for the same linker reason as `AppSettings`.
+      - App/Model/MetricsHistory.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.integration-tests

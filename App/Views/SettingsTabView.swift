@@ -81,7 +81,7 @@ struct SettingsTabView: View {
                 Text("Appearance")
             } footer: {
                 Text(isIconOnly
-                    ? "Icon only shrinks the item to about 24 pt. On a notched Mac that is often the difference between an item you can see and one the system hides."
+                    ? "Icon only shrinks the item to about 36 pt, against the 95 pt of two two-line metrics. On a notched Mac that is often the difference between an item you can see and one the system hides."
                     : "The window keeps showing every metric; this is only what the menu bar has room for.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -144,44 +144,79 @@ struct SettingsTabView: View {
         }
     }
 
+    /// The chosen metrics, in order, draggable.
+    ///
+    /// A `VStack` and not a `List`: a list inside a `Form` has no height of its
+    /// own, and the hard-coded `count * 26 + 8` it used to be given clipped
+    /// every row the moment a font or a control grew. This is as tall as its
+    /// rows are, whatever they contain, and the reordering is a drag from one
+    /// row onto another instead of a list's own move gesture.
     private var metricList: some View {
-        List {
-            ForEach(settings.menuBarMetrics) { metric in
-                HStack(spacing: Layout.gutter) {
-                    Image(systemName: "line.3.horizontal")
-                        .foregroundStyle(.tertiary)
-                        .imageScale(.small)
-                    // Fixed width: the symbols differ in width, and without
-                    // it every row would start its title at another x.
-                    Image(systemName: metric.symbolName)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20, alignment: .center)
-                    Text(metric.title)
-                    Spacer(minLength: Layout.gutter)
-                    Text(metric.caption)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                    Button {
-                        settings.setMenuBarMetric(metric, enabled: false)
-                    } label: {
-                        Image(systemName: "minus.circle.fill")
-                            .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            ForEach(Array(settings.menuBarMetrics.enumerated()), id: \.element) { index, metric in
+                if index > 0 { Divider() }
+                metricRow(metric)
+                    .draggable(metric.rawValue)
+                    .dropDestination(for: String.self) { items, _ in
+                        move(items, before: index)
                     }
-                    .buttonStyle(.borderless)
-                    .help("Remove from the menu bar")
-                }
-                .padding(.vertical, 1)
-                // Every separator starts at the same x, at the row edge.
-                .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
             }
-            .onMove { source, destination in
-                settings.moveMenuBarMetrics(from: source, to: destination)
+            if settings.menuBarMetrics.isEmpty {
+                HStack {
+                    Text("The label shows the fan symbol alone.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 4)
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .scrollDisabled(true)
-        .frame(height: CGFloat(max(settings.menuBarMetrics.count, 1)) * 26 + 8)
+    }
+
+    private func metricRow(_ metric: MenuBarMetric) -> some View {
+        HStack(spacing: Layout.gutter) {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+                .imageScale(.small)
+            // Fixed width: the symbols differ in width, and without it every
+            // row would start its title at another x.
+            Image(systemName: metric.symbolName)
+                .foregroundStyle(.secondary)
+                .frame(width: 20, alignment: .center)
+            Text(metric.title)
+                .lineLimit(1)
+            Spacer(minLength: Layout.gutter)
+            Text(metric.caption)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+            Button {
+                settings.setMenuBarMetric(metric, enabled: false)
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Remove from the menu bar")
+        }
+        .padding(.vertical, 5)
+        // The whole row is the drag handle and the drop target, not just the
+        // text inside it.
+        .contentShape(.rect)
+    }
+
+    /// Drops the dragged metric in front of the row it was let go over.
+    private func move(_ items: [String], before index: Int) {
+        guard let raw = items.first,
+              let dragged = MenuBarMetric(rawValue: raw),
+              let from = settings.menuBarMetrics.firstIndex(of: dragged),
+              from != index
+        else { return }
+        // `move(fromOffsets:toOffset:)` counts the destination in the array as
+        // it is before the move, so a drag downwards lands one place short.
+        settings.moveMenuBarMetrics(
+            from: IndexSet(integer: from),
+            to: from < index ? index + 1 : index
+        )
     }
 
     private var sensorChoices: [(key: String, title: String)] {

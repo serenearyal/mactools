@@ -50,6 +50,14 @@ final class HelperController {
         return false
     }
 
+    /// What every part of the UI says about an outdated helper, and nil while
+    /// the helper is usable. The backends refuse their calls with the same
+    /// line, so the banner, the popover and the error never disagree.
+    var mismatchMessage: String? {
+        guard case .outdated(let installed, let expected) = state else { return nil }
+        return HelperGate.mismatchMessage(installed: installed, expected: expected)
+    }
+
     // MARK: - Reading the state
 
     /// launchd first, then a ping. A job can be registered while the binary is
@@ -57,6 +65,7 @@ final class HelperController {
     /// other way round, pinging a service launchd has never heard of would
     /// turn "not installed" into a connection error.
     func refresh() async {
+        defer { publishGate() }
         let smStatus = serviceManagement.state()
         let legacyStatus = legacy.state()
         log.debug(
@@ -103,12 +112,29 @@ final class HelperController {
         }
     }
 
+    /// Tells the fan and the process backends whether this helper may be
+    /// called at all. Every path that sets `state` ends here.
+    private func publishGate() {
+        if case .outdated(let installed, let expected) = state {
+            log.error(
+                """
+                the installed helper is \(installed, privacy: .public), this app needs \
+                \(expected, privacy: .public); refusing to call it
+                """
+            )
+            HelperGate.shared.block(installed: installed, expected: expected)
+        } else {
+            HelperGate.shared.allow()
+        }
+    }
+
     // MARK: - Actions
 
     func install() async {
         guard !isBusy else { return }
         isBusy = true
         defer { isBusy = false }
+        defer { publishGate() }
         await connection.disconnect()
 
         do {
@@ -136,6 +162,7 @@ final class HelperController {
         guard !isBusy else { return }
         isBusy = true
         defer { isBusy = false }
+        defer { publishGate() }
         await connection.disconnect()
 
         var failures: [String] = []

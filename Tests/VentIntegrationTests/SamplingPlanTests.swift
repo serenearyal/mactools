@@ -141,6 +141,44 @@ struct SamplingPlanTests {
         )
     }
 
+    @Test("A covered window slows down but keeps reading everything")
+    func occludedWindow() {
+        let covered = SamplingDemand(consumers: .window, windowOccluded: true)
+        // The cadence drops...
+        #expect(
+            SamplingPlan.metricsInterval(
+                demand: covered,
+                refreshSeconds: 1,
+                menuBarMetrics: menuBar
+            ) == SamplingPlan.idleInterval
+        )
+        // ...and nothing else does: the same pass, so the graphs of a window
+        // that comes back have no hole in them.
+        #expect(request(covered) == request(SamplingDemand(consumers: .window)))
+        #expect(
+            SamplingPlan.pollsFans(
+                SamplingDemand(consumers: .window, activeTab: .fans, windowOccluded: true)
+            )
+        )
+        #expect(
+            SamplingPlan.samplesProcesses(
+                SamplingDemand(consumers: .window, activeTab: .processes, windowOccluded: true)
+            )
+        )
+    }
+
+    @Test("An open popover keeps the full cadence over a covered window")
+    func occludedWindowWithPopover() {
+        let demand = SamplingDemand(consumers: [.window, .popover], windowOccluded: true)
+        #expect(
+            SamplingPlan.metricsInterval(
+                demand: demand,
+                refreshSeconds: 1,
+                menuBarMetrics: []
+            ) == .seconds(1)
+        )
+    }
+
     // MARK: - The two stores behind a tab
 
     @Test("Processes sample for the popover and for their own tab only")

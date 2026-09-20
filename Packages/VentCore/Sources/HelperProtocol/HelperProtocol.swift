@@ -25,9 +25,10 @@ public enum HelperConstants {
     /// The certificate OU of the signing identity, which is the team id.
     public static let teamIdentifier = "M9Q5YCJ5NU"
 
-    /// Wire version of the helper protocol. Bumped on any breaking change.
-    /// 2 added the three fan methods, 3 the process snapshot and the signal.
-    public static let protocolVersion = 3
+    // There is no protocol version constant. The build number is the one
+    // version both sides already carry: the helper answers `ping` with it, the
+    // app compares it with its own and calls nothing until they match, and a
+    // second number to bump by hand could only ever disagree with the first.
 
     /// What the helper demands of a client before it accepts the connection.
     ///

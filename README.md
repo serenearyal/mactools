@@ -107,6 +107,9 @@ Each metric gets a fixed cell width, computed from the widest string it can ever
 - **Metrics**, the default: the chosen metrics, in one or two lines, with or without the fan symbol.
 - **Icon only**: the fan symbol alone, about 36 pt wide against the 95 pt of two two-line metrics. A notched Mac hides everything that does not fit behind the notch without a word, and this is the way back for a menu bar that is full.
 
+Both numbers are measured by the capture path, which writes the rendered label width and the width of the status item: the icon alone renders 20 pt and the system adds 16 pt of padding, and the default two metrics render 79 pt for a 95 pt item.
+The doc comment on `MenuBarContent` in `App/Model/Settings.swift` quotes the same two numbers.
+
 The window keeps showing every metric either way.
 
 ## The privileged helper
@@ -189,10 +192,32 @@ The four guarantees above are what covers a crash.
 ```sh
 ventctl fan-status              # fans, limits, modes, faults, interlock state
 ventctl fan-set 0 2500          # force fan 0 to 2500 rpm, clamped
+ventctl fan-set 0 2500 --hold   # the same, held until Ctrl-C, status every 2 s
 ventctl fan-auto 0              # one fan back to the firmware
 ventctl fan-auto                # every fan back to the firmware
 ventctl selftest-fans           # the gentle live sequence below
 ```
+
+`fan-set` on its own exits at once, and guarantee 1 above then applies: the connection closes, the last client is gone and the helper puts the fan back on Auto.
+The command says so in a note, so a speed that lasted milliseconds does not look like a command that did nothing.
+
+`--hold` is the way to hold a speed from the terminal.
+It keeps the XPC connection open, prints the fan every 2 s, and restores Auto on Ctrl-C, on an error and on every other way out.
+
+```
+$ ventctl fan-set 0 3000 --hold
+fan         rpm     min     max     target   hw       mode
+Fan 1       2496    1500    5400    3000     forced   constant 3000 rpm
+
+holding the connection open; the mode lasts until Ctrl-C, which restores Auto
+2 s     2731 rpm    target 3000   forced   constant 3000 rpm
+4 s     2984 rpm    target 3000   forced   constant 3000 rpm
+^C
+interrupted: restoring Auto
+```
+
+With Vent running there is a second client, so the fan keeps the mode after a bare `fan-set` as well - until the app writes its own stored mode back, which it does within seconds.
+The Fans tab is the place to set a mode that should last.
 
 ## Keyboard lock
 
@@ -305,6 +330,8 @@ Press Install again: Vent falls back to the classic installer, which asks for th
 
 **The helper is "Running v0.1.0+1, the app is v0.1.0+2".**
 The classic install keeps a copy of the binary and that copy goes stale after a rebuild.
+An outdated helper is a state of its own: Vent stops calling it, because an older build answers `ping` and then drops the connection on the first method it does not have, which would reach the user as "The helper stopped while it was answering".
+Instead the Fans tab, the popover, the Settings section and the setup row all say "The installed helper is v X, this app needs v Y - press Reinstall in Settings".
 Press Reinstall.
 
 **A permission was granted and the row is still grey.**
@@ -345,7 +372,8 @@ ventctl dump-keys | wc -l       # 2038 on a MacBookPro18,3
 ventctl sensors                 # named temperatures, power rails, voltages
 ventctl fans                    # speeds and limits, read directly
 ventctl fan-status              # the helper's view: modes, faults, interlock
-ventctl fan-set 0 2500
+ventctl fan-set 0 2500          # lasts only as long as a client is connected
+ventctl fan-set 0 2500 --hold   # holds it here until Ctrl-C
 ventctl fan-auto
 ventctl selftest-fans           # the live sequence, with a temperature guard
 ventctl procs                   # the merged process table
@@ -371,12 +399,17 @@ open -a Vent --args --show-window --tab sensors
   --overlay-preview <seconds>  draw the lock overlay and create no event tap at all
   --lock-test <seconds>        a real lock, clamped to 10 s
   --fake-fans                  a real governor over fans that do not exist
+  --fan-mode 0=constant:3000   what a fake fan should do; also curve:Tp01:45:85 and auto
+  --window-size 760x480        exact content size, for a shot at the minimum the layout allows
+  --no-activate                never take the front: the window is ordered in behind everything
   --capture <dir>              write PNGs and a status file after --capture-delay seconds
   --appearance dark|light      force one appearance
   --capture-quit               quit when the capture is done
 ```
 
 The capture path writes a status file with the window numbers of the window and of the popover, so a screenshot of either is `screencapture -x -o -l <number>`.
+Launch it with `open -g -n /Applications/Vent.app --args --no-activate ...`: `screencapture -l` photographs a window that is behind others, so a capture run never has to take the front from whoever is using the Mac.
+The one thing it cannot photograph that way is the real popover: `NSPopover` does not appear for an inactive app, so a run without activation gets the `ImageRenderer` copy instead.
 It also renders the popover with `ImageRenderer` into `popover-<appearance>.png`, which needs no Screen Recording grant at all.
 That render is the only way to see the popover in the other appearance: the real one is built against the menu bar and follows the system, whatever `--appearance` says.
 The same file counts the samples of the three stores, so a popover that left a timer running is one `grep` away.
@@ -407,16 +440,19 @@ Run them after any change to the helper, the fan code or the lock.
 - [ ] `ventctl helper-ping` answers `pong <version> uid=0`.
 - [ ] `sudo launchctl kill SIGKILL system/com.serenearyal.vent.helper`, then `ventctl helper-ping` again: launchd starts it on demand and the answer comes back.
 - [ ] An ad-hoc re-signed copy of `ventctl` is refused by the helper.
+- [ ] With a helper of an older build installed, the Settings section, the Fans banner, the popover hint and the setup row all say "The installed helper is v X, this app needs v Y - press Reinstall in Settings", and the Fans tab makes no XPC call at all (`log stream --predicate 'subsystem == "com.serenearyal.vent"'` stays quiet).
 - [ ] Settings > Uninstall removes it, and the status goes back to "Not installed".
 
 ### Fans, live
 
 `ventctl selftest-fans` does steps 1 to 3 by itself, with a temperature guard that aborts and restores Auto if any CPU sensor passes 85 °C.
 
-- [ ] `ventctl fan-set 0 2500`, then `ventctl fan-status`: the fan reaches about 2500 rpm within 20 s.
+- [ ] `ventctl fan-set 0 2500 --hold`: the fan reaches about 2500 rpm within 20 s and the status lines keep coming every 2 s.
+- [ ] Ctrl-C out of that `--hold`: it prints "restoring Auto", and `ventctl fan-status` shows mode auto and target 0.
+- [ ] `ventctl fan-set 0 2500` with Vent not running: it prints the note that the helper has already put the fan back on Auto, and `ventctl fan-status` agrees.
 - [ ] `ventctl fan-auto 0`: the mode column goes back to auto and the target to 0.
 - [ ] `sudo powermetrics --samplers smc -n 1` agrees with the tab while a fan is forced.
-- [ ] `ventctl fan-set 0 99999` and `ventctl fan-set 0 0`: both are clamped to the limits of that fan.
+- [ ] `ventctl fan-set 0 99999 --hold` and `ventctl fan-set 0 0 --hold`: both are clamped to the limits of that fan.
 - [ ] Set a sensor curve on a CPU sensor and load the machine: the speed follows the ramp and falls back slowly rather than oscillating.
 - [ ] Force a fan, then `kill -9` the Vent process: the fans are on Auto within 2 s (`ventctl fans`).
 - [ ] Force a fan, then `sudo launchctl kill SIGTERM system/com.serenearyal.vent.helper`: the fans are on Auto.

@@ -1,6 +1,8 @@
+import AppKit
 import Foundation
 
 import FanControl
+import HelperProtocol
 import SMCKit
 
 /// The fan side of the CLI. Every write goes through the helper, because only
@@ -31,18 +33,83 @@ enum FanCommands {
         }
     }
 
-    static func setConstant(index: Int, rpm: Int) throws {
+    /// Forces one fan to a constant speed.
+    ///
+    /// The helper restores Auto the moment its last client disconnects, which
+    /// is a guarantee and not a bug: no CLI invocation may leave a fan forced
+    /// after it exits. So the plain command lasts milliseconds unless something
+    /// else holds a connection, and `--hold` is that something.
+    static func setConstant(index: Int, rpm: Int, hold: Bool = false) throws {
         let snapshot = try HelperCommands.fanSnapshot()
         guard let fan = snapshot.fans.first(where: { $0.index == index }) else {
             throw CLIError("this Mac has no fan \(index)")
         }
+        if hold { installInterruptHandler() }
         try HelperCommands.setFanMode(.constant(rpm: rpm), forFan: index)
         let clamped = FanSafety.clamp(Double(rpm), minimum: fan.minimumRPM, maximum: fan.maximumRPM)
         if let clamped, Int(clamped) != rpm {
             print("note: \(rpm) is outside \(Int(fan.minimumRPM))-\(Int(fan.maximumRPM)), clamped to \(Int(clamped))")
         }
         print(table(for: try HelperCommands.fanSnapshot()))
+        if hold {
+            try holdOpen(index: index)
+        } else {
+            print(lifetimeNote(index: index, rpm: rpm))
+        }
     }
+
+    /// Keeps this process connected so the mode survives, prints the fan every
+    /// 2 s, and restores Auto on the way out.
+    private static func holdOpen(index: Int) throws {
+        print("")
+        print("holding the connection open; the mode lasts until Ctrl-C, which restores Auto")
+        defer { restoreQuietly() }
+        let started = Date.now
+        while true {
+            Thread.sleep(forTimeInterval: holdInterval)
+            let snapshot = try HelperCommands.fanSnapshot()
+            guard let fan = snapshot.fans.first(where: { $0.index == index }) else {
+                throw CLIError("fan \(index) is gone from the helper's view")
+            }
+            let elapsed = Int(Date.now.timeIntervalSince(started).rounded())
+            var line = "\(pad("\(elapsed) s", 8))"
+                + "\(pad("\(Int(fan.actualRPM)) rpm", 12))"
+                + "\(pad("target \(Int(fan.targetRPM))", 14))"
+                + "\(pad(fan.hardwareMode.rawValue, 9))"
+                + fan.mode.summary
+            if snapshot.interlockEngaged { line += "  [thermal interlock: back on Auto]" }
+            if let fault = snapshot.fault(forFan: index) { line += "  [\(fault)]" }
+            print(line)
+        }
+    }
+
+    /// The one sentence that explains why `ventctl fan-set` on its own looks
+    /// like it did nothing.
+    private static func lifetimeNote(index: Int, rpm: Int) -> String {
+        if isAppRunning {
+            return """
+                note: Vent is running and holds a connection, so the helper keeps the \
+                mode; Vent writes its own stored mode back within seconds, though. \
+                Set the mode in the Fans tab, or add --hold here, to keep this speed.
+                """
+        }
+        return """
+            note: the helper restores Auto when its last client disconnects, and this \
+            command exits now, so the fan is already back on Auto. Run \
+            'ventctl fan-set \(index) \(rpm) --hold' to hold it, or set the mode in \
+            Vent's Fans tab, which keeps a connection open.
+            """
+    }
+
+    /// Whether the app is there to keep the helper's client count above zero.
+    private static var isAppRunning: Bool {
+        !NSRunningApplication
+            .runningApplications(withBundleIdentifier: HelperConstants.appBundleIdentifier)
+            .isEmpty
+    }
+
+    /// The cadence of the helper's own governor tick.
+    private static let holdInterval: TimeInterval = 2
 
     // MARK: - Self test
 

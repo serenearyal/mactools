@@ -38,22 +38,37 @@ struct FansContent: View {
     let showSettings: () -> Void
     var scrolls = true
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            VStack(spacing: 0) {
-                banner
-                if scrolls {
-                    ScrollView { cards.padding(Layout.cardSpacing) }
-                } else {
-                    cards.padding(Layout.cardSpacing)
-                    Spacer(minLength: 0)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    /// The sensor column, which the fan cards give up room to.
+    ///
+    /// Adaptive, not fixed: at the 760 pt minimum window a fixed 236 pt column
+    /// left the curve sliders about 12 pt to draw in. The width is computed
+    /// from the pane instead of negotiated inside the `HStack`, because a
+    /// flexible frame there is resolved before the cards have said what they
+    /// need and the column keeps its maximum at every size.
+    private static let sensorColumn = (minimum: 180.0, ideal: 236.0, cards: 400.0)
 
-            Divider()
-            SensorColumn(store: store, settings: settings, scrolls: scrolls)
-                .frame(width: 236)
+    static func sensorColumnWidth(paneWidth: CGFloat) -> CGFloat {
+        min(sensorColumn.ideal, max(sensorColumn.minimum, paneWidth - sensorColumn.cards))
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            HStack(alignment: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    banner
+                    if scrolls {
+                        ScrollView { cards.padding(Layout.cardSpacing) }
+                    } else {
+                        cards.padding(Layout.cardSpacing)
+                        Spacer(minLength: 0)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                Divider()
+                SensorColumn(store: store, settings: settings, scrolls: scrolls)
+                    .frame(width: FansContent.sensorColumnWidth(paneWidth: proxy.size.width))
+            }
         }
     }
 
@@ -88,12 +103,28 @@ struct FansContent: View {
                 EmptyView()
             } else {
                 BannerRow(
-                    symbolName: "exclamationmark.triangle.fill",
+                    symbolName: helper.needsReinstall
+                        ? "arrow.triangle.2.circlepath"
+                        : "exclamationmark.triangle.fill",
                     tint: .orange,
                     title: helperTitle,
-                    detail: "Fan control needs the helper that runs as root.",
+                    detail: helper.mismatchMessage
+                        ?? "Fan control needs the helper that runs as root.",
                     actionTitle: "Open Settings",
                     action: showSettings
+                )
+            }
+            // Never overwritten by a poll, and only the user takes it away: a
+            // refused command is the one thing here the user asked for.
+            if let refusal = fans.lastCommandFailure {
+                BannerRow(
+                    symbolName: "exclamationmark.octagon.fill",
+                    tint: .red,
+                    title: "The last fan command was refused",
+                    detail: refusal,
+                    actionTitle: nil,
+                    action: nil,
+                    dismiss: { fans.clearCommandFailure() }
                 )
             }
             if fans.interlockEngaged {
@@ -106,6 +137,8 @@ struct FansContent: View {
                     action: nil
                 )
             }
+            // The same fault also sits on the fan's own card; here it is the
+            // one place that shows it while the card is scrolled away.
             ForEach(fans.faults, id: \.fanIndex) { fault in
                 BannerRow(
                     symbolName: "exclamationmark.octagon.fill",
@@ -155,7 +188,7 @@ struct FansContent: View {
     private var helperTitle: String {
         switch helper.state {
         case .requiresApproval: "The helper is waiting for approval in System Settings"
-        case .outdated: "The installed helper is older than this app"
+        case .outdated: "The installed helper needs updating"
         case .failed(let message): "The helper is not usable: \(message)"
         default: "The privileged helper is not installed"
         }
@@ -195,6 +228,9 @@ private struct BannerRow: View {
     let detail: String
     let actionTitle: String?
     let action: (() -> Void)?
+    /// Set for a banner the user may take away, the way the Processes tab
+    /// clears its last message.
+    var dismiss: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Layout.gutter) {
@@ -212,6 +248,15 @@ private struct BannerRow: View {
             Spacer(minLength: Layout.gutter)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
+            }
+            if let dismiss {
+                Button(action: dismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .imageScale(.medium)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss")
             }
         }
         .padding(.horizontal, Layout.cardPadding)
@@ -252,6 +297,16 @@ private struct FanCard: View {
 
     var body: some View {
         Card(title: fan.name, symbolName: "fan", fills: false) {
+            if let fault = fans.faults.first(where: { $0.fanIndex == fan.index })?.reason {
+                HStack(alignment: .firstTextBaseline, spacing: Layout.gutter) {
+                    Image(systemName: "exclamationmark.octagon.fill")
+                        .foregroundStyle(.red)
+                    Text(fault)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            }
             speedRow
             SegmentedBar(
                 segments: [.init(id: "speed", value: fan.loadFraction, style: barStyle)],
@@ -370,6 +425,20 @@ struct CurveSettings: Equatable {
     var maxTemp: Double
 }
 
+/// A range a `Slider` or a `Stepper` can always be given.
+///
+/// Both trap when the lower bound is above the upper one, and a fan whose
+/// firmware reports a minimum above its maximum is exactly that: one bad SMC
+/// read would otherwise crash the tab.
+private func guardedRange(_ lower: Double, _ upper: Double) -> ClosedRange<Double> {
+    lower...Swift.max(upper, lower + 1)
+}
+
+private extension FanStatus {
+    /// The speed limits as a range every control of the card shares.
+    var rpmRange: ClosedRange<Double> { guardedRange(minimumRPM, maximumRPM) }
+}
+
 // MARK: - Constant
 
 private struct ConstantEditor: View {
@@ -382,7 +451,7 @@ private struct ConstantEditor: View {
 
     var body: some View {
         HStack(spacing: Layout.gutter * 1.5) {
-            Slider(value: binding, in: fan.minimumRPM...max(fan.maximumRPM, fan.minimumRPM + 1))
+            Slider(value: binding, in: fan.rpmRange)
             TextField(
                 "rpm",
                 value: binding,
@@ -392,10 +461,10 @@ private struct ConstantEditor: View {
             .multilineTextAlignment(.trailing)
             .monospacedDigit()
             .frame(width: 72)
-            Stepper("Speed", value: binding, in: fan.minimumRPM...fan.maximumRPM, step: ConstantEditor.step)
+            Stepper("Speed", value: binding, in: fan.rpmRange, step: ConstantEditor.step)
                 .labelsHidden()
-            Button("Max") { binding.wrappedValue = fan.maximumRPM }
-                .disabled(rpm >= Int(fan.maximumRPM.rounded()))
+            Button("Max") { binding.wrappedValue = fan.rpmRange.upperBound }
+                .disabled(rpm >= Int(fan.rpmRange.upperBound.rounded()))
                 .help("Full blast for this fan")
         }
     }
@@ -407,7 +476,7 @@ private struct ConstantEditor: View {
                 // Steps of 50: finer than any fan resolves, and it keeps the
                 // slider from writing a new setpoint for every pixel.
                 let stepped = (value / ConstantEditor.step).rounded() * ConstantEditor.step
-                let clamped = min(max(stepped, fan.minimumRPM), fan.maximumRPM)
+                let clamped = min(max(stepped, fan.rpmRange.lowerBound), fan.rpmRange.upperBound)
                 Task { await fans.setMode(.constant(rpm: Int(clamped.rounded())), forFan: fan.index) }
             }
         )
@@ -437,23 +506,23 @@ private struct CurveEditor: View {
                 }
                 .labelsHidden()
             }
-            GridRow {
+            GridRow(alignment: .firstTextBaseline) {
                 Text("Start")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 temperatureRow(
                     value: startBinding,
-                    range: 20...(curve.maxTemp - 1),
+                    range: guardedRange(20, curve.maxTemp - 1),
                     caption: "fan at minimum below this"
                 )
             }
-            GridRow {
+            GridRow(alignment: .firstTextBaseline) {
                 Text("Full speed")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 temperatureRow(
                     value: maxBinding,
-                    range: (curve.startTemp + 1)...105,
+                    range: guardedRange(curve.startTemp + 1, 105),
                     caption: "fan at maximum above this"
                 )
             }
@@ -463,23 +532,31 @@ private struct CurveEditor: View {
             .frame(height: 132)
     }
 
+    /// The slider, its value, and the caption under both.
+    ///
+    /// The caption used to sit beside them in a fixed 150 pt: with the 56 pt
+    /// value that left about 12 pt of slider in a 760 pt window. Under the row
+    /// it costs one line of height and the slider gets the whole width, at
+    /// every window size.
     private func temperatureRow(
         value: Binding<Double>,
         range: ClosedRange<Double>,
         caption: String
     ) -> some View {
-        HStack(spacing: Layout.gutter) {
-            // No `step:`: a stepped slider draws a row of tick marks under the
-            // track, and whole degrees come from the bindings instead.
-            Slider(value: value, in: range.lowerBound < range.upperBound ? range : range.lowerBound...(range.lowerBound + 1))
-            Text(Fmt.temperature(value.wrappedValue, unit: settings.temperatureUnit))
-                .font(.callout)
-                .monospacedDigit()
-                .frame(width: 56, alignment: .trailing)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: Layout.gutter) {
+                // No `step:`: a stepped slider draws a row of tick marks under
+                // the track, and whole degrees come from the bindings instead.
+                Slider(value: value, in: range)
+                Text(Fmt.temperature(value.wrappedValue, unit: settings.temperatureUnit))
+                    .font(.callout)
+                    .monospacedDigit()
+                    .frame(width: 56, alignment: .trailing)
+            }
             Text(caption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .frame(width: 150, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -491,9 +568,11 @@ private struct CurveEditor: View {
         return store.snapshot.temperature(forKey: key)?.celsius
     }
 
+    /// The key first: the picker is the narrowest control of the card, and a
+    /// title that truncates must still say which sensor the curve follows.
     private var sensorChoices: [(key: String, title: String)] {
         var choices = store.history.orderedSensors.map {
-            (key: $0.key.stringValue, title: "\($0.label) (\($0.key.stringValue))")
+            (key: $0.key.stringValue, title: "\($0.key.stringValue) · \($0.label)")
         }
         if !choices.contains(where: { $0.key == curve.sensorKey }) {
             choices.insert((key: curve.sensorKey, title: curve.sensorKey), at: 0)
@@ -595,7 +674,7 @@ private struct CurvePlot: View {
             }
         }
         .chartXScale(domain: domain)
-        .chartYScale(domain: fan.minimumRPM...max(fan.maximumRPM, fan.minimumRPM + 1))
+        .chartYScale(domain: fan.rpmRange)
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 5)) {
                 AxisGridLine()
@@ -670,10 +749,14 @@ private struct SensorColumn: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(store.history.orderedSensors) { trace in
                         HStack(spacing: Layout.gutter) {
+                            // The column is 180 pt at the narrowest window, so
+                            // a long sensor name truncates; the tooltip is
+                            // where the whole one still is.
                             Text(trace.label)
                                 .font(.callout)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
+                                .help(trace.label)
                             Spacer(minLength: Layout.gutter)
                             Text(Fmt.temperature(trace.current, unit: settings.temperatureUnit))
                                 .font(.callout)

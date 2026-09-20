@@ -19,6 +19,10 @@ final class MainWindowController {
     private var observers: [NSObjectProtocol] = []
     /// Set while a show is waiting for the scene to build the window.
     private var pendingActivation = false
+    /// `--window-size WxH`, applied as soon as there is a window.
+    private var forcedContentSize: CGSize?
+    /// `--no-activate`. See `suppressActivation()`.
+    private var activates = true
 
     /// Called by the app scene, which is the only place `openWindow` exists.
     func setOpenAction(_ action: @escaping () -> Void) {
@@ -31,6 +35,7 @@ final class MainWindowController {
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName(MainWindowController.frameAutosaveName)
         observe(window)
+        applyForcedSize(to: window)
         if pendingActivation {
             bringToFront(window)
         } else {
@@ -69,10 +74,47 @@ final class MainWindowController {
         }
     }
 
+    /// `--window-size 760x480`: the exact content size a capture run wants,
+    /// which is the only way to photograph the layout at the minimum the
+    /// window allows. The autosaved frame is ignored while it is set.
+    func forceContentSize(_ size: CGSize) {
+        forcedContentSize = size
+        if let window { applyForcedSize(to: window) }
+    }
+
+    /// `--no-activate`: the window is ordered on screen behind everything and
+    /// never takes the front or the key focus.
+    ///
+    /// A capture run is the only caller. `screencapture -l <number>` can
+    /// photograph a window that is behind others, so a run that measures the
+    /// layout needs no activation at all - and an agent that steals the front
+    /// while somebody is typing is worse than a missing screenshot.
+    func suppressActivation() {
+        activates = false
+    }
+
+    private func applyForcedSize(to window: NSWindow) {
+        guard let size = forcedContentSize else { return }
+        window.setContentSize(size)
+        // The frame autosave writes the old size back when the window is
+        // ordered front, so the size is re-applied on the next turn as well.
+        DispatchQueue.main.async { window.setContentSize(size) }
+    }
+
     /// An accessory app has to ask for activation; without it the window
     /// appears behind the app that was in front.
+    ///
+    /// Only a user action reaches this: the status item, the right-click menu,
+    /// the popover, a relaunch, or a checklist button that needs the tab it
+    /// opens. `--no-activate` turns the whole thing into an ordinary order-in
+    /// behind the front app, for a capture run.
     private func bringToFront(_ window: NSWindow) {
         pendingActivation = false
+        guard activates else {
+            window.orderBack(nil)
+            updateVisibility()
+            return
+        }
         NSApp.activate()
         // Belt and braces: cooperative activation can refuse `NSApp.activate`
         // when another app holds the front, and this asks the workspace
@@ -104,12 +146,19 @@ final class MainWindowController {
         }
     }
 
+    /// Visible means on screen and not in the Dock, and nothing else.
+    ///
+    /// Occlusion is deliberately not part of it. A window another window covers
+    /// is one click away from the user, and treating it as hidden emptied the
+    /// tables and tore holes in the graphs every time something was dragged
+    /// over Vent. It is reported separately, and it may only slow the sampling
+    /// down.
     private func updateVisibility(forcedHidden: Bool = false) {
         let visible = !forcedHidden
             && (window?.isVisible ?? false)
             && !(window?.isMiniaturized ?? false)
-            && (window?.occlusionState.contains(.visible) ?? false)
-        AppServices.shared.setWindowVisible(visible)
+        let occluded = visible && !(window?.occlusionState.contains(.visible) ?? true)
+        AppServices.shared.setWindowVisible(visible, occluded: occluded)
     }
 }
 

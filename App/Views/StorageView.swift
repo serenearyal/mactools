@@ -70,11 +70,23 @@ struct StorageView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .truncationMode(.tail)
+            if storage.message != nil {
+                Button {
+                    storage.clearMessage()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss")
+            }
 
             Spacer(minLength: Layout.gutter)
 
             SearchField(text: $storage.searchText)
-                .frame(width: 190)
+                .frame(minWidth: 120, idealWidth: 190, maxWidth: 190)
 
             Button {
                 storage.revealInFinder(storage.selection)
@@ -119,6 +131,10 @@ struct StorageView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .scrollBounceBehavior(.basedOnSize)
         } else {
+            // The ideal widths add up to the 560 pt the detail pane has in the
+            // 760 pt minimum window: a `Table` lays out at the ideal and clips
+            // the rest instead of shrinking, so ideals that add up to more
+            // than the pane push the last columns off screen.
             Table(of: StorageRow.self, selection: $storage.selection, sortOrder: $storage.sortOrder) {
                 TableColumn("Name", value: \.name) { row in
                     HStack(spacing: 6) {
@@ -130,7 +146,7 @@ struct StorageView: View {
                     }
                     .opacity(row.exists ? 1 : 0.4)
                 }
-                .width(min: 150, ideal: 230)
+                .width(min: 130, ideal: 180)
 
                 TableColumn("Folder") { row in
                     Text(row.parent)
@@ -139,7 +155,7 @@ struct StorageView: View {
                         .foregroundStyle(.secondary)
                         .opacity(row.exists ? 1 : 0.4)
                 }
-                .width(min: 110, ideal: 200)
+                .width(min: 100, ideal: 116)
 
                 TableColumn("Size on disk", value: \.allocated) { row in
                     trailing(Fmt.storageSize(row.allocated))
@@ -150,7 +166,7 @@ struct StorageView: View {
                 TableColumn("Logical") { row in
                     trailing(row.logicalNote ?? "", muted: true)
                 }
-                .width(80)
+                .width(72)
 
                 // The day is enough to decide whether a file is still wanted,
                 // and the time would only truncate at this width.
@@ -159,7 +175,7 @@ struct StorageView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                .width(104)
+                .width(96)
             } rows: {
                 ForEach(rows) { TableRow($0) }
             }

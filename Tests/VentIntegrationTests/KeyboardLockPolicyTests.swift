@@ -135,4 +135,54 @@ final class KeyboardLockPolicyTests: XCTestCase {
         XCTAssertEqual(LockTimeout.title(300), "5 min")
         XCTAssertEqual(LockTimeout.title(90), "1 min 30 s")
     }
+
+    // MARK: - Permissions and recovery
+
+    func testCanLockNeedsBothGrantsAndNoSecureInput() {
+        XCTAssertFalse(LockPermissions().canLock)
+        XCTAssertFalse(LockPermissions(accessibility: true).canLock)
+        XCTAssertTrue(LockPermissions(accessibility: true, inputMonitoring: true).canLock)
+        XCTAssertFalse(
+            LockPermissions(
+                accessibility: true,
+                inputMonitoring: true,
+                secureInputEnabled: true
+            ).canLock
+        )
+    }
+
+    /// The bug this covers: a lock refused for a missing permission stayed
+    /// `.failed` for the rest of the session, even after the user granted it.
+    func testAGrantedPermissionEndsAFailedState() {
+        let granted = LockPermissions(accessibility: true, inputMonitoring: true)
+        XCTAssertTrue(LockRecovery.clearsFailure(isFailed: true, permissions: granted))
+    }
+
+    func testAFailedStateSurvivesWhileAPermissionIsMissing() {
+        XCTAssertFalse(
+            LockRecovery.clearsFailure(
+                isFailed: true,
+                permissions: LockPermissions(accessibility: true)
+            )
+        )
+        XCTAssertFalse(
+            LockRecovery.clearsFailure(
+                isFailed: true,
+                permissions: LockPermissions(
+                    accessibility: true,
+                    inputMonitoring: true,
+                    secureInputEnabled: true
+                )
+            )
+        )
+    }
+
+    func testAStateThatDidNotFailIsNeverTouched() {
+        XCTAssertFalse(
+            LockRecovery.clearsFailure(
+                isFailed: false,
+                permissions: LockPermissions(accessibility: true, inputMonitoring: true)
+            )
+        )
+    }
 }

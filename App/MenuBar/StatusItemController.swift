@@ -134,6 +134,12 @@ final class StatusItemController: NSObject {
         if popoverController.isShown { statusItem.button?.highlight(true) }
     }
 
+    /// `--no-activate`, for a capture run: the popover appears without taking
+    /// the front from the app the user is working in.
+    func suppressActivation() {
+        popoverController.suppressActivation()
+    }
+
     /// The `--show-popover` debug path, and the way back when the window is
     /// hidden behind the notch.
     func showPopover(sticky: Bool = false) {

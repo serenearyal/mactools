@@ -86,10 +86,16 @@ final class SetupChecklist {
         case .outdated: ("Reinstall", .installHelper)
         default: ("Install", .installHelper)
         }
+        // An installed helper of another build is not a missing helper: it
+        // answers, and every call that matters fails. The row says so.
+        let title = helper.needsReinstall
+            ? "Privileged helper - update needed"
+            : "Privileged helper"
         return SetupStep(
             id: "helper",
-            title: "Privileged helper",
-            reason: "Fan control, and the CPU and memory of processes you do not own, need a daemon that runs as root.",
+            title: title,
+            reason: helper.mismatchMessage
+                ?? "Fan control, and the CPU and memory of processes you do not own, need a daemon that runs as root.",
             isDone: helper.state.isRunning,
             actionTitle: action?.0,
             action: action?.1

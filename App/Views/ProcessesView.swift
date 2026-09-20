@@ -44,13 +44,16 @@ struct ProcessesView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            // 300 pt is what the three segments need; below it the titles are
+            // clipped, so the search field beside it is what gives way in a
+            // narrow window instead.
             .frame(width: 300)
             .controlSize(.small)
 
             Spacer(minLength: Layout.gutter)
 
             SearchField(text: $store.searchText, prompt: "Name, PID or path")
-                .frame(width: 190)
+                .frame(minWidth: 90, idealWidth: 190, maxWidth: 190)
 
             Button {
                 ask(.terminate)
@@ -104,7 +107,7 @@ struct ProcessesView: View {
                             .truncationMode(.middle)
                     }
                 }
-                .width(min: 150, ideal: 240)
+                .width(min: 140, ideal: 210)
 
                 TableColumn("PID", sortUsing: ProcessComparator(key: .pid)) { row in
                     Text(String(row.pid))
@@ -119,7 +122,7 @@ struct ProcessesView: View {
                         .truncationMode(.middle)
                         .foregroundStyle(.secondary)
                 }
-                .width(min: 80, ideal: 108)
+                .width(min: 72, ideal: 96)
 
                 TableColumn("CPU %", sortUsing: ProcessComparator(key: .cpu)) { row in
                     CPUCell(percent: row.cpuPercent)

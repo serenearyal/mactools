@@ -50,6 +50,7 @@ struct MenuBarPopoverView: View {
                 ThermalSection(
                     snapshot: snapshot,
                     fans: services.fans,
+                    helper: services.helper,
                     settings: services.settings,
                     actions: actions,
                     open: open
@@ -410,6 +411,7 @@ private struct StorageSection: View {
 private struct ThermalSection: View {
     let snapshot: MetricsSnapshot
     let fans: FanStore
+    let helper: HelperController
     let settings: AppSettings
     let actions: MenuBarPopoverActions
     let open: (MainTab) -> Void
@@ -483,11 +485,26 @@ private struct ThermalSection: View {
         .controlSize(.small)
         .disabled(!fans.isAvailable)
 
-        if !fans.isAvailable {
-            Text("Fan control needs the privileged helper.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        // One line under the buttons, in this order: the helper is the wrong
+        // build, then the last command was refused, then no helper at all. A
+        // refused command is invisible anywhere else in the popover.
+        if let mismatch = helper.mismatchMessage {
+            hint(mismatch, tint: .red)
+            Button("Open Settings") { open(.settings) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        } else if let refusal = fans.lastCommandFailure {
+            hint(refusal, tint: .red)
+        } else if !fans.isAvailable {
+            hint("Fan control needs the privileged helper.", tint: .secondary)
         }
+    }
+
+    private func hint(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundStyle(tint)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func temperature(_ reading: TemperatureReading?) -> String {

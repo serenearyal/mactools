@@ -20,7 +20,12 @@ enum MenuBarLabelStyle: String, CaseIterable, Codable, Identifiable, Sendable {
 ///
 /// A notched Mac hides everything that does not fit behind the notch, without
 /// a word, and a Vent label with three metrics is wide. Icon only shrinks the
-/// item to about 24 pt, which is what a crowded menu bar has left.
+/// item to about 36 pt, against the 95 pt of two two-line metrics.
+///
+/// Both numbers are measured, not guessed: `--capture` writes the rendered
+/// label width and the width of the status item itself, and the icon alone
+/// renders 20 pt with 16 pt of padding from the system. The README quotes the
+/// same two numbers.
 enum MenuBarContent: String, CaseIterable, Codable, Identifiable, Sendable {
     case metrics
     case iconOnly

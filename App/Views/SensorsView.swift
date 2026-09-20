@@ -39,47 +39,52 @@ struct SensorsView: View {
         .padding(.vertical, Layout.gutter * 1.5)
     }
 
+    /// Every ideal width adds up to the 560 pt the detail pane has in the
+    /// 760 pt minimum window. A `Table` lays its columns out at their ideal
+    /// and clips what does not fit rather than shrinking to the minimum, so
+    /// the sum of the ideals is what decides whether the last column is on
+    /// screen at all.
     private var table: some View {
         Table(of: SensorTrace.self) {
             TableColumn("Sensor") { trace in
                 Text(trace.label)
                     .lineLimit(1)
             }
-            .width(min: 180, ideal: 240)
+            .width(min: 150, ideal: 210)
 
             TableColumn("Key") { trace in
                 Text(trace.key.stringValue)
                     .monospaced()
                     .foregroundStyle(.secondary)
             }
-            .width(48)
+            .width(44)
 
             TableColumn("Now") { trace in
                 Text(Fmt.temperature(trace.current, unit: settings.temperatureUnit, digits: 1))
                     .monospacedDigit()
                     .foregroundStyle(MetricColor.temperature(trace.current))
             }
-            .width(72)
+            .width(64)
 
             TableColumn("Min") { trace in
                 Text(Fmt.temperature(trace.minimum, unit: settings.temperatureUnit, digits: 1))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            .width(72)
+            .width(64)
 
             TableColumn("Max") { trace in
                 Text(Fmt.temperature(trace.maximum, unit: settings.temperatureUnit, digits: 1))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            .width(72)
+            .width(64)
 
             TableColumn("History") { trace in
                 Sparkline(values: Array(trace.values), minimumRange: 2)
                     .frame(height: 18)
             }
-            .width(min: 80, ideal: 140)
+            .width(min: 50, ideal: 60)
         } rows: {
             ForEach(groups) { group in
                 Section(group.title) {

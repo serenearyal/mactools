@@ -4,7 +4,7 @@ import HelperProtocol
 import ScanKit
 
 let usage = """
-ventctl - debug CLI for Vent (protocol \(HelperConstants.protocolVersion))
+ventctl - debug CLI for Vent
 
 usage: ventctl <command> [options]
 
@@ -25,7 +25,12 @@ commands:
   fan-status   print the fan state the helper sees
   fan-auto     hand one fan, or every fan, back to the firmware
   fan-set      force one fan to a constant speed
+  fan-probe    report what this machine's SMC allows on the fan keys
   selftest-fans  run the gentle live fan sequence with a temperature guard
+
+The helper restores Auto as soon as its last client disconnects, so a bare
+'fan-set' lasts only as long as the command itself unless Vent is running.
+'fan-set --hold' keeps this process connected and holds the speed until Ctrl-C.
 
 options:
   procs        --sort cpu|mem   order of the table (default cpu)
@@ -37,6 +42,8 @@ options:
   helper-read  <KEY>            four-character SMC key, for example F0Ac
   fan-auto     [index|all]      default all
   fan-set      <index> <rpm>    clamped to the limits of that fan
+               --hold           keep the speed, print status every 2 s,
+                                restore Auto on Ctrl-C
 """
 
 func fail(_ message: String) -> Never {
@@ -164,10 +171,12 @@ do {
         }
         try FanCommands.setAuto(tail.first)
     case "fan-set":
-        guard tail.count == 2, let index = Int(tail[0]), let rpm = Int(tail[1]) else {
-            throw CLIError("'fan-set' takes a fan index and a speed, for example 'ventctl fan-set 0 2500'")
+        let hold = tail.contains("--hold")
+        let positional = tail.filter { $0 != "--hold" }
+        guard positional.count == 2, let index = Int(positional[0]), let rpm = Int(positional[1]) else {
+            throw CLIError("'fan-set' takes a fan index and a speed, for example 'ventctl fan-set 0 2500 --hold'")
         }
-        try FanCommands.setConstant(index: index, rpm: rpm)
+        try FanCommands.setConstant(index: index, rpm: rpm, hold: hold)
     case "fan-probe":
         try withoutOptions()
         try FanProbe.run()

@@ -49,7 +49,23 @@ final class StorageStore {
 
     var searchText = ""
     var sortOrder = [KeyPathComparator(\StorageRow.allocated, order: .reverse)]
-    var selection: Set<StorageRow.ID> = []
+
+    /// The rows the table has selected.
+    ///
+    /// Not a plain stored property: the last message is about the selection it
+    /// acted on, so a new selection makes it stale and the status line goes
+    /// back to "Scanned 2 h ago". `trash` subtracts what it moved before it
+    /// writes its own message, so its message survives.
+    var selection: Set<StorageRow.ID> {
+        get { selectedIDs }
+        set {
+            guard newValue != selectedIDs else { return }
+            selectedIDs = newValue
+            message = nil
+        }
+    }
+
+    private var selectedIDs: Set<StorageRow.ID> = []
 
     @ObservationIgnored private let cache = ScanCache()
     @ObservationIgnored private var coordinator: ScanCoordinator?
@@ -252,6 +268,13 @@ final class StorageStore {
         Task.detached(priority: .utility) {
             try? cache.save(pruned, volume: ScanCache.volumeIdentifier(for: root))
         }
+    }
+
+    /// The dismiss button of the status line, and the selection change and the
+    /// scan that make the message stale. Without it "Moved 3 items to the
+    /// Trash" hid "Scanned 2 h ago" for the rest of the session.
+    func clearMessage() {
+        message = nil
     }
 
     func openFullDiskAccessSettings() {

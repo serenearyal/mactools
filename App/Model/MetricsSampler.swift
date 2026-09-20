@@ -22,6 +22,9 @@ actor MetricsSampler {
     private var deadKeys: Set<SMCFourCC> = []
     /// Fan count, minimum and maximum, read one time.
     private var fanLayout: [FanReading]?
+    /// Which suffix this machine spells the fan mode register with, read one
+    /// time with the layout. nil when it has none.
+    private var fanModeSuffix: String?
     private var catalogTemperatureKeys: [SMCFourCC]?
 
     var topology: CoreTopology { cpuSampler.topology }
@@ -47,6 +50,7 @@ actor MetricsSampler {
             sample.smcAvailable = smc() != nil
             if request.temperatures != .none {
                 sample.temperatures = readTemperatures(request.temperatures)
+                sample.temperatureScope = request.temperatures
             }
             if request.fans {
                 sample.fans = readFans()
@@ -126,27 +130,42 @@ actor MetricsSampler {
         }
     }
 
-    /// The first pass uses the full `readFans()` for the count, the limits and
-    /// the mode; later passes only re-read the live RPM keys.
+    /// The first pass uses the full `readFans()` for the count and the limits,
+    /// which do not change; later passes re-read the live keys.
+    ///
+    /// The mode register is one of them. It is what the firmware is doing right
+    /// now, the helper or `ventctl` can change it from outside this process,
+    /// and a cached copy would leave the Overview and the popover claiming Auto
+    /// over a fan that is forced. The key info is cached, so it costs one
+    /// driver round trip per fan.
     private func readFans() -> [FanReading] {
         guard let smc = smc() else { return [] }
         guard let layout = fanLayout else {
             let fans = (try? smc.readFans()) ?? []
             fanLayout = fans
+            fanModeSuffix = (try? smc.fanCapabilities())?.modeSuffix
             return fans
         }
         return layout.map { fan in
-            let actual = FanKeys.key(fan: fan.index, suffix: "Ac").flatMap { value(for: $0) }
-            let target = FanKeys.key(fan: fan.index, suffix: "Tg").flatMap { value(for: $0) }
+            let actual = FanKeys.key(fan: fan.index, suffix: FanKeys.actual).flatMap { value(for: $0) }
+            let target = FanKeys.key(fan: fan.index, suffix: FanKeys.target).flatMap { value(for: $0) }
             return FanReading(
                 index: fan.index,
                 actual: actual ?? fan.actual,
                 minimum: fan.minimum,
                 maximum: fan.maximum,
                 target: target ?? fan.target,
-                mode: fan.mode
+                mode: mode(ofFan: fan.index) ?? fan.mode
             )
         }
+    }
+
+    private func mode(ofFan index: Int) -> SMCFanMode? {
+        guard let suffix = fanModeSuffix,
+              let key = FanKeys.key(fan: index, suffix: suffix),
+              let value = value(for: key)
+        else { return nil }
+        return value == 0 ? .auto : .forced
     }
 
     private func readPower(_ scope: PowerScope) -> [PowerReading] {
