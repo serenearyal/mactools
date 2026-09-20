@@ -25,8 +25,15 @@ final class AppServices {
     /// Observed: the sidebar reads it. The consumers next to it are not, so
     /// opening the popover does not invalidate the window's views.
     private var tab: MainTab = .overview
+    /// Observed: the segmented control of the popover reads it.
+    private var section: PopoverSection = .dashboard
     @ObservationIgnored private var consumers: SamplingConsumers = []
     @ObservationIgnored private var windowOccluded = false
+    /// False under `--popover-section`: a capture run shows a section without
+    /// rewriting the one the user chose.
+    @ObservationIgnored private var persistsPopoverSection = true
+    /// What the stores were last told, for the status file of a capture run.
+    @ObservationIgnored private(set) var demand = SamplingDemand()
 
     /// The sidebar selection. Setting it tells the stores what to sample.
     var selectedTab: MainTab {
@@ -36,6 +43,25 @@ final class AppServices {
             tab = newValue
             publishDemand()
         }
+    }
+
+    /// The popover's segmented control. It is remembered between launches, and
+    /// it decides what an open popover samples.
+    var popoverSection: PopoverSection {
+        get { section }
+        set {
+            guard section != newValue else { return }
+            section = newValue
+            if persistsPopoverSection { settings.popoverSection = newValue }
+            publishDemand()
+        }
+    }
+
+    /// `--popover-section <name>`: the section a capture run wants, kept out
+    /// of the settings file.
+    func overridePopoverSection(_ section: PopoverSection) {
+        persistsPopoverSection = false
+        popoverSection = section
     }
 
     /// Who wants live numbers. The window and the popover each set their own
@@ -67,8 +93,10 @@ final class AppServices {
         let demand = SamplingDemand(
             consumers: consumers,
             activeTab: tab,
+            popoverSection: section,
             windowOccluded: windowOccluded
         )
+        self.demand = demand
         // Memory only, at `info` level: the line is how a sampling leak is
         // proved afterwards, and it is of no interest otherwise.
         AppLog.app.info("sampling demand: \(demand.summary, privacy: .public)")
@@ -80,6 +108,7 @@ final class AppServices {
     private init() {
         let settings = AppSettings()
         self.settings = settings
+        section = settings.popoverSection
         store = MetricsStore(settings: settings)
         // The fake fans keep their modes to themselves: a screenshot run must
         // not rewrite what the user's real fans do.

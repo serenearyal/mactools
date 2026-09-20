@@ -49,6 +49,29 @@ struct SampleRequest: Sendable, Equatable {
         fans: true,
         power: .labelled
     )
+
+    /// What a tab or a popover section that shows no live number asks for.
+    /// The CPU is off here on purpose: the menu bar request turns it back on
+    /// when the label needs it, and this value must add nothing of its own.
+    static let nothing = SampleRequest(cpu: false)
+
+    /// True when a pass for this request would read no counter at all.
+    var readsNothing: Bool {
+        self == SampleRequest.nothing
+    }
+
+    /// One line for the status file of a capture run.
+    var summary: String {
+        var parts: [String] = []
+        if cpu { parts.append("cpu") }
+        if memory { parts.append("memory") }
+        if diskSpace { parts.append("disk") }
+        if diskIO { parts.append("diskIO") }
+        if temperatures != .none { parts.append("temperatures(\(temperatures))") }
+        if fans { parts.append("fans") }
+        if power != .none { parts.append("power(\(power))") }
+        return parts.isEmpty ? "nothing" : parts.joined(separator: " + ")
+    }
 }
 
 /// One immutable pass of the sampler, produced off the main thread.

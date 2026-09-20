@@ -39,8 +39,12 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
         popover.animates = false
         popover.delegate = self
         // The first frame is drawn at this size and then grows to the content,
-        // which is a visible jump if the guess is far out.
-        popover.contentSize = CGSize(width: PopoverLayout.width, height: 420)
+        // which is a visible jump if the guess is far out. Every section is
+        // the same height, so this one is exact.
+        popover.contentSize = CGSize(
+            width: PopoverLayout.width,
+            height: PopoverLayout.contentHeight + PopoverLayout.chromeHeight
+        )
     }
 
     // MARK: - Showing
@@ -98,6 +102,12 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
                 openTab: { [weak self] tab in
                     self?.close()
                     services.windowController.show(tab: tab)
+                },
+                // The section is remembered and it decides what the popover
+                // samples, so it goes through the services, not through a
+                // `@State` of the view.
+                selectSection: { section in
+                    services.popoverSection = section
                 },
                 lockKeyboard: { [weak self] in
                     // The overlay takes the whole screen; the popover would be

@@ -41,11 +41,16 @@ enum DebugCapture {
                 dark: suffix == "dark",
                 to: base.appending(path: "detail-\(tab)-\(suffix).png")
             )
-            capturePopover(
-                services: services,
-                dark: suffix == "dark",
-                to: base.appending(path: "popover-\(suffix).png")
-            )
+            // All three sections in one run: the popover is pure SwiftUI, so
+            // it costs one `ImageRenderer` pass each and saves two launches.
+            for section in PopoverSection.allCases {
+                capturePopover(
+                    services: services,
+                    section: section,
+                    dark: suffix == "dark",
+                    to: base.appending(path: "popover-\(section.rawValue)-\(suffix).png")
+                )
+            }
             writeStatus(
                 services: services,
                 to: base.appending(path: "status-\(tab)-\(suffix).txt")
@@ -161,8 +166,13 @@ enum DebugCapture {
     /// It is also the only way to see the popover in the appearance it does
     /// not have: the real one is built against the menu bar and follows the
     /// system, whatever `--appearance` says.
-    private static func capturePopover(services: AppServices, dark: Bool, to url: URL) {
-        let content = MenuBarPopoverView(services: services)
+    private static func capturePopover(
+        services: AppServices,
+        section: PopoverSection,
+        dark: Bool,
+        to url: URL
+    ) {
+        let content = MenuBarPopoverView(services: services, forcedSection: section)
             .padding(.vertical, 2)
             .background(Color(nsColor: .windowBackgroundColor))
             .environment(\.colorScheme, dark ? .dark : .light)
@@ -204,6 +214,19 @@ enum DebugCapture {
             "popover shown: \(services.statusItemController?.isPopoverShown ?? false)",
             // `screencapture -x -o -l <n>` photographs the real popover.
             "popover window number: \(services.statusItemController?.popoverWindowNumber ?? 0)",
+            "popover section: \(services.popoverSection.rawValue)",
+            "menu bar tip shown: \(services.statusItemController?.isTipShown ?? false)",
+            "menu bar tip window number: \(services.statusItemController?.tipWindowNumber ?? 0)",
+            "menu bar tip seen: \(services.settings.menuBarTipShown)",
+            "status item on screen: \(services.statusItemController?.isItemOnScreen ?? false)",
+            "show dock icon: \(services.settings.showDockIcon)",
+            // What the stores were last asked for, and by whom.
+            "sampling demand: \(services.demand.summary)",
+            "metrics request: \(metricsRequest(services).summary)",
+            "window tab request: \(SamplingPlan.windowRequest(tab: services.selectedTab, showsUnlabelledSensors: services.settings.showUnlabelledSensors).summary)",
+            "popover section request: \(SamplingPlan.popoverRequest(section: services.popoverSection).summary)",
+            "samples processes: \(SamplingPlan.samplesProcesses(services.demand))",
+            "polls fans: \(SamplingPlan.pollsFans(services.demand))",
             "window number: \(window?.windowNumber ?? 0)",
             "app active: \(NSApp.isActive)",
             "activation policy: \(NSApp.activationPolicy().rawValue)",
@@ -239,6 +262,16 @@ enum DebugCapture {
             "fan polls: \(services.fans.pollCount)",
         ]
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// What one pass really reads, for the demand on screen at this moment.
+    private static func metricsRequest(_ services: AppServices) -> SampleRequest {
+        SamplingPlan.metricsRequest(
+            demand: services.demand,
+            menuBarMetrics: services.settings.menuBarMetrics,
+            chosenSensorScope: .labelled,
+            showsUnlabelledSensors: services.settings.showUnlabelledSensors
+        )
     }
 
     /// The three heaviest rows, so a capture run can check the CPU column

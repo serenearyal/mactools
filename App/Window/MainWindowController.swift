@@ -23,6 +23,14 @@ final class MainWindowController {
     private var forcedContentSize: CGSize?
     /// `--no-activate`. See `suppressActivation()`.
     private var activates = true
+    /// The last value `updateVisibility` published, so the first close can be
+    /// told from the launch of an app that has no window yet.
+    private var wasVisible = false
+
+    /// Called the first time a visible window goes away, whatever closed it:
+    /// the toolbar button, the red dot or Cmd-W. The status item answers with
+    /// the one-time tip.
+    var onHidden: (() -> Void)?
 
     /// Called by the app scene, which is the only place `openWindow` exists.
     func setOpenAction(_ action: @escaping () -> Void) {
@@ -50,11 +58,18 @@ final class MainWindowController {
 
     func toggle() {
         if isVisible {
-            window?.orderOut(nil)
-            updateVisibility()
+            hide()
         } else {
             show()
         }
+    }
+
+    /// "Hide to Menu Bar", and Cmd-W with it. The window goes away, the status
+    /// item and the sampling of the menu bar label stay.
+    func hide() {
+        guard let window, window.isVisible else { return }
+        window.orderOut(nil)
+        updateVisibility()
     }
 
     func show(tab: MainTab? = nil) {
@@ -159,6 +174,11 @@ final class MainWindowController {
             && !(window?.isMiniaturized ?? false)
         let occluded = visible && !(window?.occlusionState.contains(.visible) ?? true)
         AppServices.shared.setWindowVisible(visible, occluded: occluded)
+        // A window that was on screen and is not any more: the one moment the
+        // tip has something to explain. A window in the Dock is not it: the
+        // user can see where that one went.
+        if wasVisible, !visible, !(window?.isMiniaturized ?? false) { onHidden?() }
+        wasVisible = visible
     }
 }
 

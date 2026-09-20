@@ -6,9 +6,13 @@ struct MainWindowView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: selection) {
-                ForEach(MainTab.allCases) { tab in
-                    Label(tab.title, systemImage: tab.symbolName)
-                        .tag(tab)
+                ForEach(MainTabSection.allCases) { section in
+                    Section(section.title) {
+                        ForEach(section.tabs) { tab in
+                            Label(tab.title, systemImage: tab.symbolName)
+                                .tag(tab)
+                        }
+                    }
                 }
             }
             .navigationSplitViewColumnWidth(min: 176, ideal: 192, max: 240)
@@ -23,6 +27,19 @@ struct MainWindowView: View {
             .navigationTitle(services.selectedTab.title)
         }
         .frame(minWidth: 760, minHeight: 480)
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    services.windowController.hide()
+                } label: {
+                    Label("Hide to Menu Bar", systemImage: "menubar.arrow.up.rectangle")
+                }
+                // An accessory app has no menu bar of its own, so Cmd-W would
+                // do nothing at all without this.
+                .keyboardShortcut("w", modifiers: .command)
+                .help("Close the window. Vent keeps running in the menu bar.")
+            }
+        }
     }
 
     private var selection: Binding<MainTab?> {
@@ -63,6 +80,9 @@ struct TabDetailView: View {
             )
         case .storage:
             StorageView(store: services.store, storage: services.storage)
+        // R7, R3 and R4 fill these three. They sample nothing until they do.
+        case .windows, .keepAwake, .backlight:
+            PlaceholderTabView(tab: tab)
         case .keyboardLock:
             KeyboardLockView(settings: services.settings, lock: services.keyboardLock)
         case .settings:

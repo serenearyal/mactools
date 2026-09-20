@@ -11,6 +11,7 @@ final class StatusItemController: NSObject {
     private let store: MetricsStore
     private let windowController: MainWindowController
     private let popoverController: MenuBarPopoverController
+    private let tipController: MenuBarTipController
 
     private var lastCells: [MenuBarCell] = []
     private var lastStyle: MenuBarLabelStyle?
@@ -29,6 +30,15 @@ final class StatusItemController: NSObject {
     /// The popover, for the debug capture path.
     var popoverWindowNumber: Int { popoverController.windowNumber }
     var isPopoverShown: Bool { popoverController.isShown }
+    /// The first-close tip, for the debug capture path.
+    var tipWindowNumber: Int { tipController.windowNumber }
+    var isTipShown: Bool { tipController.isShown }
+    /// What the tip checks before it points at the item.
+    var isItemOnScreen: Bool {
+        guard statusItem.isVisible, let window = statusItem.button?.window, window.frame.width > 0
+        else { return false }
+        return NSScreen.screens.contains { $0.frame.intersects(window.frame) }
+    }
 
     private lazy var contextMenu: NSMenu = {
         let menu = NSMenu()
@@ -54,6 +64,7 @@ final class StatusItemController: NSObject {
         self.store = store
         self.windowController = windowController
         self.popoverController = popoverController
+        tipController = MenuBarTipController(settings: settings)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
@@ -135,9 +146,30 @@ final class StatusItemController: NSObject {
     }
 
     /// `--no-activate`, for a capture run: the popover appears without taking
-    /// the front from the app the user is working in.
+    /// the front from the app the user is working in, and no tip is ever
+    /// popped at whoever is using the machine.
     func suppressActivation() {
         popoverController.suppressActivation()
+        tipController.suppress()
+    }
+
+    /// A capture run shows and hides the window on its own; no tip belongs in
+    /// a screenshot that did not ask for one.
+    func suppressMenuBarTip() {
+        tipController.suppress()
+    }
+
+    /// Everything the first-close tip needs. The window controller calls this
+    /// the first time the window goes away.
+    func showMenuBarTipIfNeeded() {
+        tipController.showIfNeeded(from: statusItem)
+    }
+
+    /// `--show-menu-bar-tip`: let the tip appear even when it has been seen
+    /// and even in a capture run. It still arrives the one way it ever does,
+    /// when the window goes away, so the screenshot is of the real path.
+    func allowMenuBarTip() {
+        tipController.force()
     }
 
     /// The `--show-popover` debug path, and the way back when the window is

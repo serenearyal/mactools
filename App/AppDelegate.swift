@@ -4,6 +4,12 @@ import SysMetrics
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
+    /// `--no-activate`: a capture run never takes the front, not even when the
+    /// activation policy changes under it.
+    private var activates = true
+    /// `--dock-icon-test`: the Dock icon for one run, with the settings file
+    /// left exactly as the user wrote it.
+    private var dockIconOverride: Bool?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu bar app: no Dock icon, no menu bar owner. LSUIElement already
@@ -37,8 +43,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         statusItemController = controller
         services.statusItemController = controller
+        // The first time the window goes away, the status item explains where
+        // it went. Once ever, and never during a capture run.
+        services.windowController.onHidden = { [weak controller] in
+            controller?.showMenuBarTipIfNeeded()
+        }
+        // The Dock icon is a setting, so the policy above is only the default.
+        applyActivationPolicy(services: services)
+        trackDockIconSetting(services: services)
 
         applyLaunchArguments(services: services)
+    }
+
+    // MARK: - Dock icon
+
+    /// `.regular` gives Vent a Dock icon, an app switcher entry and a menu
+    /// bar; `.accessory` is the menu bar app it is by default.
+    ///
+    /// Live: the toggle in Settings lands here. Switching to `.regular` needs
+    /// a re-activation, otherwise the app owns the menu bar without drawing
+    /// it. Switching back to `.accessory` resigns the front, and AppKit orders
+    /// the window out with it, so a window that was on screen is put back.
+    private func applyActivationPolicy(services: AppServices) {
+        let wanted: NSApplication.ActivationPolicy =
+            (dockIconOverride ?? services.settings.showDockIcon) ? .regular : .accessory
+        guard NSApp.activationPolicy() != wanted else { return }
+        let hadWindow = services.windowController.isVisible
+        NSApp.setActivationPolicy(wanted)
+        AppLog.app.notice("activation policy: \(wanted == .regular ? "regular" : "accessory", privacy: .public)")
+        if wanted == .regular {
+            // A `.regular` app that is not activated owns a menu bar it does
+            // not draw. `--no-activate` is the one case that must not.
+            if activates {
+                NSApp.activate()
+                NSRunningApplication.current.activate(options: [.activateAllWindows])
+            }
+        } else if hadWindow {
+            // Resigning the front takes the window with it on the way back to
+            // `.accessory`; a window that was on screen stays on screen.
+            services.windowController.show()
+        }
+    }
+
+    private func trackDockIconSetting(services: AppServices) {
+        withObservationTracking {
+            _ = services.settings.showDockIcon
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                applyActivationPolicy(services: services)
+                trackDockIconSetting(services: services)
+            }
+        }
     }
 
     /// Last chance to give the keyboard, the fans and the disk back.
@@ -75,17 +131,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// run needs no click.
     private func applyLaunchArguments(services: AppServices) {
         let arguments = CommandLine.arguments
-        if let index = arguments.firstIndex(of: "--tab"), index + 1 < arguments.count {
-            let name = arguments[index + 1].lowercased()
-            if let tab = MainTab.allCases.first(where: { $0.rawValue.lowercased() == name }) {
-                services.selectedTab = tab
-            }
+        if let index = arguments.firstIndex(of: "--tab"), index + 1 < arguments.count,
+           let tab = MainTab(argument: arguments[index + 1]) {
+            services.selectedTab = tab
+        }
+        // `--popover-section dashboard|windows|tools`. An override: the
+        // section the user chose stays in the settings file untouched.
+        if let index = arguments.firstIndex(of: "--popover-section"), index + 1 < arguments.count,
+           let section = PopoverSection(argument: arguments[index + 1]) {
+            services.overridePopoverSection(section)
         }
         // `--no-activate` first of all: every path below that shows something
         // must obey it, so a capture run never takes the front from the user.
         if arguments.contains("--no-activate") {
+            activates = false
             services.windowController.suppressActivation()
             services.statusItemController?.suppressActivation()
+        }
+        // `--dock-icon-test <seconds>`: switch the Dock icon on at that second
+        // and off five seconds later, through the same call the Settings
+        // toggle makes. It proves both directions, and above all that the
+        // window survives the way back to `.accessory`.
+        if let index = arguments.firstIndex(of: "--dock-icon-test"), index + 1 < arguments.count,
+           let seconds = Double(arguments[index + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(seconds, 0)) { [weak self] in
+                self?.dockIconOverride = true
+                self?.applyActivationPolicy(services: services)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(seconds, 0) + 5) { [weak self] in
+                self?.dockIconOverride = false
+                self?.applyActivationPolicy(services: services)
+            }
+        }
+        if arguments.contains("--capture") {
+            services.statusItemController?.suppressMenuBarTip()
         }
         // `--window-size 760x480` before `--show-window`, so the window is
         // built at the size a capture run asked for instead of resizing on
@@ -114,6 +193,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
                     services.statusItemController?.closePopover()
                 }
+            }
+        }
+        // `--show-menu-bar-tip` lets the one-time tip appear whatever the
+        // settings say, which is the only way it shows up in a capture run. It
+        // still comes from the window closing, and it writes nothing back.
+        if arguments.contains("--show-menu-bar-tip") {
+            services.statusItemController?.allowMenuBarTip()
+        }
+        // `--hide-window-after <seconds>` presses "Hide to Menu Bar" for a
+        // capture run: the same call the toolbar button makes, so the status
+        // file shows what a user who closes the window gets.
+        if let index = arguments.firstIndex(of: "--hide-window-after"),
+           index + 1 < arguments.count,
+           let seconds = Double(arguments[index + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(seconds, 0)) {
+                services.windowController.hide()
             }
         }
         // `--setup-checklist show|hide` draws the Overview with and without

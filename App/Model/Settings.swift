@@ -100,6 +100,14 @@ struct SettingsData: Codable, Equatable, Sendable {
     /// False until the user closes the setup card on the Overview. The
     /// Settings tab brings it back.
     var setupChecklistDismissed: Bool = false
+    /// The popover section the user last looked at.
+    var popoverSection: PopoverSection = .dashboard
+    /// `.regular` instead of `.accessory`: a Dock icon, and the way back when
+    /// the notch hides the status item.
+    var showDockIcon: Bool = false
+    /// True once the "Vent keeps running here" tip has been shown. It appears
+    /// the first time the window is closed and never again.
+    var menuBarTipShown: Bool = false
 
     init() {}
 
@@ -131,6 +139,12 @@ struct SettingsData: Codable, Equatable, Sendable {
             ?? fallback.fanModes
         setupChecklistDismissed = try container.decodeIfPresent(Bool.self, forKey: .setupChecklistDismissed)
             ?? fallback.setupChecklistDismissed
+        popoverSection = try container.decodeIfPresent(PopoverSection.self, forKey: .popoverSection)
+            ?? fallback.popoverSection
+        showDockIcon = try container.decodeIfPresent(Bool.self, forKey: .showDockIcon)
+            ?? fallback.showDockIcon
+        menuBarTipShown = try container.decodeIfPresent(Bool.self, forKey: .menuBarTipShown)
+            ?? fallback.menuBarTipShown
     }
 }
 
@@ -175,6 +189,21 @@ final class AppSettings {
     var setupChecklistDismissed: Bool {
         get { data.setupChecklistDismissed }
         set { data.setupChecklistDismissed = newValue; persist() }
+    }
+
+    var popoverSection: PopoverSection {
+        get { data.popoverSection }
+        set { data.popoverSection = newValue; persist() }
+    }
+
+    var showDockIcon: Bool {
+        get { data.showDockIcon }
+        set { data.showDockIcon = newValue; persist() }
+    }
+
+    var menuBarTipShown: Bool {
+        get { data.menuBarTipShown }
+        set { data.menuBarTipShown = newValue; persist() }
     }
 
     var refreshInterval: RefreshInterval {

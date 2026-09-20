@@ -6,3 +6,4 @@ Config/local.xcconfig
 .DS_Store
 *.xcuserstate
 .swiftpm/
+.claude/

@@ -77,6 +77,11 @@ struct SettingsTabView: View {
                         Text(unit.title).tag(unit)
                     }
                 }
+                Toggle("Show Dock icon", isOn: $settings.showDockIcon)
+                    .help("Also show Vent in the Dock and in the app switcher")
+                Text("With the Dock icon on, clicking it opens the window. It is the way back when a full menu bar hides the status item behind the notch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } header: {
                 Text("Appearance")
             } footer: {

@@ -3,43 +3,21 @@ import SMCKit
 import SwiftUI
 import SysMetrics
 
-/// What the popover can ask the app to do. A struct of closures rather than a
-/// reference to the controller: the view is rendered by the capture path too,
-/// where none of these should fire.
-struct MenuBarPopoverActions {
-    var openTab: (MainTab) -> Void = { _ in }
-    var lockKeyboard: () -> Void = {}
-    var startAuto: () -> Void = {}
-    var startFullBlast: () -> Void = {}
-    var quit: () -> Void = {}
-}
-
-/// The sizes the popover follows. Narrow enough to sit under a status item,
-/// wide enough for "385 GB of 494 GB used" on one line.
-enum PopoverLayout {
-    static let width: CGFloat = 340
-    static let maximumHeight: CGFloat = 560
-    static let padding: CGFloat = 12
-    static let rowSpacing: CGFloat = 6
-    static let sectionSpacing: CGFloat = 8
-}
-
-/// The dropdown behind the status item: everything the window shows, at a
-/// glance, plus the four actions worth reaching without opening the window.
+/// Everything the window shows, at a glance: CPU, memory, storage, thermals
+/// with the two fan commands, and the heaviest processes.
 ///
 /// Every section title opens the matching tab. The numbers come straight from
-/// the stores, which sample at the normal interval while this is on screen.
-struct MenuBarPopoverView: View {
+/// the stores, which sample at the user's interval while this is on screen.
+struct PopoverDashboard: View {
     let services: AppServices
-    var actions = MenuBarPopoverActions()
+    let actions: MenuBarPopoverActions
+    let open: (MainTab) -> Void
 
     private var store: MetricsStore { services.store }
     private var snapshot: MetricsSnapshot { services.store.snapshot }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
             section { CPUSection(store: store, open: open) }
             Divider()
             section { MemorySection(memory: snapshot.memory, open: open) }
@@ -58,19 +36,7 @@ struct MenuBarPopoverView: View {
             }
             Divider()
             section { ProcessSection(processes: services.processes, open: open) }
-            Divider()
-            footer
         }
-        .frame(width: PopoverLayout.width, alignment: .leading)
-        .frame(maxHeight: PopoverLayout.maximumHeight)
-        .fixedSize(horizontal: false, vertical: true)
-        // The popover takes the key window, and SwiftUI would draw a focus
-        // ring around the first button of a panel nobody is tabbing through.
-        .focusEffectDisabled()
-    }
-
-    private func open(_ tab: MainTab) {
-        actions.openTab(tab)
     }
 
     /// The padding every section shares. Each section stacks its own rows, so
@@ -80,117 +46,6 @@ struct MenuBarPopoverView: View {
             .padding(.horizontal, PopoverLayout.padding)
             .padding(.vertical, PopoverLayout.sectionSpacing)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        HStack(spacing: PopoverLayout.rowSpacing) {
-            Image(systemName: "fan.fill")
-                .foregroundStyle(.tint)
-                .imageScale(.medium)
-            Text("Vent")
-                .font(.headline)
-            Spacer(minLength: PopoverLayout.rowSpacing)
-            PopoverIconButton(symbolName: "macwindow", help: "Open Vent") {
-                open(.overview)
-            }
-            PopoverIconButton(symbolName: "gearshape", help: "Settings") {
-                open(.settings)
-            }
-            PopoverIconButton(symbolName: "power", help: "Quit Vent", action: actions.quit)
-        }
-        .padding(.horizontal, PopoverLayout.padding)
-        .padding(.vertical, 10)
-    }
-
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack(spacing: PopoverLayout.rowSpacing) {
-            Button(action: actions.lockKeyboard) {
-                Label("Lock Keyboard", systemImage: "keyboard")
-                    .frame(maxWidth: .infinity)
-            }
-            .help("Swallow every key until you unlock, for cleaning")
-            Button { open(.storage) } label: {
-                Label("Scan Storage...", systemImage: "magnifyingglass")
-                    .frame(maxWidth: .infinity)
-            }
-            .help("Open the Storage tab to find the largest files")
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .padding(.horizontal, PopoverLayout.padding)
-        .padding(.vertical, 10)
-    }
-}
-
-// MARK: - Shared pieces
-
-/// A section title that opens a tab. The whole label is the hit area, and the
-/// chevron says so without a hover.
-private struct PopoverSectionTitle: View {
-    let title: String
-    let symbolName: String
-    let tab: MainTab
-    let open: (MainTab) -> Void
-
-    var body: some View {
-        Button { open(tab) } label: {
-            HStack(spacing: 4) {
-                Image(systemName: symbolName)
-                    .imageScale(.small)
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .foregroundStyle(.secondary)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help("Open the \(tab.title) tab")
-    }
-}
-
-private struct PopoverIconButton: View {
-    let symbolName: String
-    let help: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbolName)
-                .imageScale(.medium)
-                .foregroundStyle(.secondary)
-                .frame(width: 22, height: 20)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help(help)
-    }
-}
-
-/// A caption over a value, both on fixed baselines so nothing moves when the
-/// number changes width.
-private struct PopoverStat: View {
-    let caption: String
-    let value: String
-    var tint: Color?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(caption)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.tertiary)
-            Text(value)
-                .font(.callout.weight(.medium))
-                .monospacedDigit()
-                .foregroundStyle(tint ?? .primary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -208,14 +63,14 @@ private struct CPUSection: View {
                 PopoverSectionTitle(title: "CPU", symbolName: "cpu", tab: .overview, open: open)
                 Spacer(minLength: PopoverLayout.rowSpacing)
                 Sparkline(values: Array(store.history.cpuTotal), minimumRange: 5)
-                    .frame(width: 72, height: 16)
+                    .frame(width: 96, height: 18)
                 Text(cpu.map { Fmt.compactPercent($0.total.percent) } ?? "--")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .monospacedDigit()
-                    .frame(width: 44, alignment: .trailing)
+                    .frame(width: 56, alignment: .trailing)
             }
 
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: PopoverLayout.sectionSpacing) {
                 CoreGroup(tag: "E", loads: loads(of: .efficiency), tint: .accentColor.opacity(0.55))
                 CoreGroup(tag: "P", loads: loads(of: .performance), tint: .accentColor)
                 Spacer(minLength: PopoverLayout.rowSpacing)
@@ -223,7 +78,7 @@ private struct CPUSection: View {
                     Text("user \(Fmt.percent(cpu?.total.user ?? 0, fractionDigits: 1))")
                     Text("sys \(Fmt.percent(cpu?.total.system ?? 0, fractionDigits: 1))")
                 }
-                .font(.caption2)
+                .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
             }
@@ -269,11 +124,11 @@ private struct CoreBar: View {
     var body: some View {
         RoundedRectangle(cornerRadius: 1.5, style: .continuous)
             .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.5))
-            .frame(width: 5, height: 20)
+            .frame(width: 6, height: 22)
             .overlay(alignment: .bottom) {
                 RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                     .fill(tint)
-                    .frame(height: max(1, 20 * percent.clamped(to: 0...100) / 100))
+                    .frame(height: max(1, 22 * percent.clamped(to: 0...100) / 100))
             }
     }
 }
@@ -311,7 +166,7 @@ private struct MemorySection: View {
                     .init(id: "cached", value: Double(memory?.cachedFiles ?? 0), style: Color.secondary.opacity(0.35)),
                 ],
                 total: Double(memory?.total ?? 1),
-                height: 6
+                height: 7
             )
 
             HStack(spacing: PopoverLayout.rowSpacing) {
@@ -371,7 +226,7 @@ private struct StorageSection: View {
                     )
                 ],
                 total: Double(volume?.total ?? 1),
-                height: 6
+                height: 7
             )
 
             HStack(spacing: PopoverLayout.rowSpacing) {
@@ -383,11 +238,13 @@ private struct StorageSection: View {
                     systemImage: "arrow.down"
                 )
                 .monospacedDigit()
+                .frame(width: 96, alignment: .trailing)
                 Label(
                     Fmt.throughput(snapshot.diskIO?.bytesWrittenPerSecond ?? 0),
                     systemImage: "arrow.up"
                 )
                 .monospacedDigit()
+                .frame(width: 96, alignment: .trailing)
             }
             .font(.caption)
             .imageScale(.small)
@@ -457,7 +314,9 @@ private struct ThermalSection: View {
             )
         }
 
-        ForEach(fanRows, id: \.index) { row in
+        // Two at most: the popover keeps one height, and a Mac with more fans
+        // has them all on the Fans tab.
+        ForEach(fanRows.prefix(2), id: \.index) { row in
             HStack(spacing: PopoverLayout.rowSpacing) {
                 Text(row.name)
                     .foregroundStyle(.secondary)
@@ -466,7 +325,7 @@ private struct ThermalSection: View {
                 Spacer(minLength: PopoverLayout.rowSpacing)
                 Text(row.rpm)
                     .monospacedDigit()
-                    .frame(width: 64, alignment: .trailing)
+                    .frame(width: 72, alignment: .trailing)
             }
             .font(.caption)
         }
@@ -482,29 +341,22 @@ private struct ThermalSection: View {
             .help("Hold every fan at its maximum RPM")
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
+        .controlSize(.regular)
         .disabled(!fans.isAvailable)
 
         // One line under the buttons, in this order: the helper is the wrong
         // build, then the last command was refused, then no helper at all. A
         // refused command is invisible anywhere else in the popover.
         if let mismatch = helper.mismatchMessage {
-            hint(mismatch, tint: .red)
+            PopoverHint(text: mismatch, tint: .red)
             Button("Open Settings") { open(.settings) }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
         } else if let refusal = fans.lastCommandFailure {
-            hint(refusal, tint: .red)
+            PopoverHint(text: refusal, tint: .red)
         } else if !fans.isAvailable {
-            hint("Fan control needs the privileged helper.", tint: .secondary)
+            PopoverHint(text: "Fan control needs the privileged helper.")
         }
-    }
-
-    private func hint(_ text: String, tint: Color) -> some View {
-        Text(text)
-            .font(.caption2)
-            .foregroundStyle(tint)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func temperature(_ reading: TemperatureReading?) -> String {
@@ -514,28 +366,12 @@ private struct ThermalSection: View {
     /// The helper knows the mode the user asked for; without it the SMC read
     /// still gives the speed, and the mode is what the firmware reports.
     private var fanRows: [FanRow] {
-        if fans.isAvailable, !fans.fans.isEmpty {
-            return fans.fans.map { fan in
-                FanRow(
-                    index: fan.index,
-                    name: "Fan \(fan.index + 1)",
-                    rpm: Fmt.rpm(fan.actualRPM),
-                    mode: FanRow.title(of: fan.mode)
-                )
-            }
-        }
-        return snapshot.fans.map { fan in
-            FanRow(
-                index: fan.index,
-                name: "Fan \(fan.index + 1)",
-                rpm: Fmt.rpm(fan.actual),
-                mode: fan.mode == .forced ? "Constant" : "Auto"
-            )
-        }
+        FanRow.rows(fans: fans, snapshot: snapshot)
     }
 }
 
-private struct FanRow {
+/// One fan, named the way both sources of truth allow.
+struct FanRow {
     let index: Int
     let name: String
     let rpm: String
@@ -546,6 +382,28 @@ private struct FanRow {
         case .auto: "Auto"
         case .constant: "Constant"
         case .curve: "Curve"
+        }
+    }
+
+    @MainActor
+    static func rows(fans: FanStore, snapshot: MetricsSnapshot) -> [FanRow] {
+        if fans.isAvailable, !fans.fans.isEmpty {
+            return fans.fans.map { fan in
+                FanRow(
+                    index: fan.index,
+                    name: "Fan \(fan.index + 1)",
+                    rpm: Fmt.rpm(fan.actualRPM),
+                    mode: title(of: fan.mode)
+                )
+            }
+        }
+        return snapshot.fans.map { fan in
+            FanRow(
+                index: fan.index,
+                name: "Fan \(fan.index + 1)",
+                rpm: Fmt.rpm(fan.actual),
+                mode: fan.mode == .forced ? "Constant" : "Auto"
+            )
         }
     }
 }
@@ -585,7 +443,7 @@ private struct ProcessSection: View {
     }
 
     private func column(caption: String, rows: [ProcessLine]) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(caption)
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)
@@ -599,6 +457,7 @@ private struct ProcessSection: View {
                         Text(row.value)
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
+                            .frame(width: 56, alignment: .trailing)
                     }
                     .font(.caption)
                     .contentShape(.rect)

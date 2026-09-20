@@ -145,6 +145,7 @@ targets:
       # linker pull SwiftUICore, which a unit-test bundle may not link.
       - App/Model/SamplingPlan.swift
       - App/Model/MainTab.swift
+      - App/Model/PopoverSection.swift
       - App/Model/MetricsSample.swift
       - App/Model/MenuBarMetric.swift
       # The graph and sensor history: which traces a pass adds and which one

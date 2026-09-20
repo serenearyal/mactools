@@ -54,10 +54,70 @@ struct SamplingPlanTests {
         #expect(plan.power == .system)
     }
 
-    @Test("The window reads everything")
-    func windowRequest() {
+    @Test("The Windows section of the popover reads nothing of its own")
+    func popoverWindowsRequest() {
+        let plan = request(SamplingDemand(consumers: .popover, popoverSection: .windows))
+        // The menu bar label is all that is left.
+        #expect(plan == request(SamplingDemand()))
+        #expect(!plan.memory)
+        #expect(!plan.fans)
+    }
+
+    @Test("The Tools section of the popover reads the fans and nothing else")
+    func popoverToolsRequest() {
+        let plan = request(SamplingDemand(consumers: .popover, popoverSection: .tools))
+        #expect(plan.fans)
+        #expect(!plan.memory)
+        #expect(!plan.diskSpace)
+        #expect(!plan.diskIO)
+        // The CPU is the menu bar label's, not the section's.
+        #expect(SamplingPlan.popoverRequest(section: .tools).fans)
+        #expect(!SamplingPlan.popoverRequest(section: .tools).cpu)
+    }
+
+    @Test("Every popover section asks for at most what the Dashboard asks for")
+    func popoverSectionsAreSubsets() {
+        let dashboard = SamplingPlan.popoverRequest(section: .dashboard)
+        for section in PopoverSection.allCases {
+            #expect(dashboard.union(SamplingPlan.popoverRequest(section: section)) == dashboard)
+        }
+    }
+
+    @Test("The Overview reads everything it draws, and no rail list")
+    func overviewRequest() {
         let plan = request(SamplingDemand(consumers: .window))
-        #expect(plan == SampleRequest.everything)
+        #expect(plan.cpu)
+        #expect(plan.memory)
+        #expect(plan.diskSpace)
+        #expect(plan.diskIO)
+        #expect(plan.fans)
+        #expect(plan.temperatures == .labelled)
+        // `PSTR` alone: the labelled rails belong to the Sensors tab.
+        #expect(plan.power == .system)
+    }
+
+    @Test("Every tab reads what it shows and nothing more")
+    func perTabRequests() {
+        func plan(_ tab: MainTab) -> SampleRequest {
+            SamplingPlan.windowRequest(tab: tab, showsUnlabelledSensors: false)
+        }
+        #expect(plan(.sensors) == SampleRequest(cpu: false, temperatures: .labelled, power: .labelled))
+        #expect(plan(.fans) == SampleRequest(cpu: false, temperatures: .labelled, fans: true))
+        #expect(plan(.storage) == SampleRequest(cpu: false, diskSpace: true, diskIO: true))
+        // The process table comes from `ProcessStore`, not from a pass.
+        #expect(plan(.processes) == .nothing)
+        for tab in [MainTab.windows, .keepAwake, .backlight, .keyboardLock, .settings] {
+            #expect(plan(tab) == .nothing, "\(tab.rawValue) must sample nothing")
+        }
+        #expect(plan(.overview).readsNothing == false)
+    }
+
+    @Test("A tab that shows nothing leaves the idle request untouched")
+    func silentTabRequest() {
+        for tab in [MainTab.windows, .keepAwake, .backlight, .keyboardLock, .settings, .processes] {
+            let plan = request(SamplingDemand(consumers: .window, activeTab: tab))
+            #expect(plan == request(SamplingDemand()), "\(tab.rawValue) must add nothing")
+        }
     }
 
     @Test("The Sensors tab with unlabelled sensors on is the only catalog read")
@@ -220,10 +280,129 @@ struct SamplingPlanTests {
     @Test("The demand names itself for the log")
     func summary() {
         #expect(SamplingDemand().summary == "menu bar only")
-        #expect(SamplingDemand(consumers: .popover).summary == "popover")
+        #expect(SamplingDemand(consumers: .popover).summary == "popover(dashboard)")
         #expect(
-            SamplingDemand(consumers: [.window, .popover], activeTab: .fans).summary
-                == "window(fans) + popover"
+            SamplingDemand(
+                consumers: [.window, .popover],
+                activeTab: .fans,
+                popoverSection: .tools
+            ).summary == "window(fans) + popover(tools)"
         )
+    }
+
+    // MARK: - The popover sections behind the two stores
+
+    @Test("Processes sample for the Dashboard section alone")
+    func processDemandPerSection() {
+        #expect(
+            SamplingPlan.samplesProcesses(
+                SamplingDemand(consumers: .popover, popoverSection: .dashboard)
+            )
+        )
+        for section in [PopoverSection.windows, .tools] {
+            #expect(
+                !SamplingPlan.samplesProcesses(
+                    SamplingDemand(consumers: .popover, popoverSection: section)
+                ),
+                "\(section.rawValue) must not sample processes"
+            )
+        }
+    }
+
+    @Test("Fans poll for the Dashboard and the Tools sections, never for Windows")
+    func fanDemandPerSection() {
+        #expect(
+            SamplingPlan.pollsFans(SamplingDemand(consumers: .popover, popoverSection: .dashboard))
+        )
+        #expect(
+            SamplingPlan.pollsFans(SamplingDemand(consumers: .popover, popoverSection: .tools))
+        )
+        #expect(
+            !SamplingPlan.pollsFans(SamplingDemand(consumers: .popover, popoverSection: .windows))
+        )
+        // A remembered section with the popover closed is nobody looking.
+        #expect(!SamplingPlan.pollsFans(SamplingDemand(popoverSection: .tools)))
+    }
+
+    @Test("A silent tab or section does not raise the cadence")
+    func silentConsumerInterval() {
+        let windows = SamplingDemand(consumers: .window, activeTab: .windows)
+        #expect(
+            SamplingPlan.metricsInterval(
+                demand: windows,
+                refreshSeconds: 1,
+                menuBarMetrics: []
+            ) == SamplingPlan.idleInterval
+        )
+        // With a label to draw, the menu bar's own cadence takes over.
+        #expect(
+            SamplingPlan.metricsInterval(
+                demand: windows,
+                refreshSeconds: 1,
+                menuBarMetrics: menuBar
+            ) == .seconds(1)
+        )
+        let popoverWindows = SamplingDemand(consumers: .popover, popoverSection: .windows)
+        #expect(
+            SamplingPlan.metricsInterval(
+                demand: popoverWindows,
+                refreshSeconds: 1,
+                menuBarMetrics: []
+            ) == SamplingPlan.idleInterval
+        )
+        // Tools shows a fan, so it pays the user's interval.
+        #expect(
+            SamplingPlan.metricsInterval(
+                demand: SamplingDemand(consumers: .popover, popoverSection: .tools),
+                refreshSeconds: 1,
+                menuBarMetrics: []
+            ) == .seconds(1)
+        )
+    }
+}
+
+/// The sidebar and the launch arguments that name a tab.
+@Suite("Main tabs")
+struct MainTabTests {
+    @Test("Every tab sits in exactly one sidebar section, in the sidebar order")
+    func sections() {
+        #expect(MainTabSection.orderedTabs == MainTab.allCases)
+        #expect(MainTabSection.monitor.tabs == [.overview, .sensors, .processes, .storage])
+        #expect(MainTabSection.control.tabs == [.fans, .windows, .keepAwake])
+        #expect(MainTabSection.tools.tabs == [.keyboardLock, .backlight])
+        #expect(MainTabSection.app.tabs == [.settings])
+    }
+
+    @Test("Every tab has a title and a symbol")
+    func titles() {
+        for tab in MainTab.allCases {
+            #expect(!tab.title.isEmpty)
+            #expect(!tab.symbolName.isEmpty)
+        }
+    }
+
+    @Test("`--tab` takes the new names, in any case and with any separator")
+    func argument() {
+        #expect(MainTab(argument: "windows") == .windows)
+        #expect(MainTab(argument: "keepAwake") == .keepAwake)
+        #expect(MainTab(argument: "keep-awake") == .keepAwake)
+        #expect(MainTab(argument: "KEEP_AWAKE") == .keepAwake)
+        #expect(MainTab(argument: "backlight") == .backlight)
+        #expect(MainTab(argument: "keyboardlock") == .keyboardLock)
+        #expect(MainTab(argument: "nonsense") == nil)
+        for tab in MainTab.allCases {
+            #expect(MainTab(argument: tab.rawValue) == tab)
+        }
+    }
+
+    @Test("`--popover-section` takes the three section names")
+    func popoverSectionArgument() {
+        for section in PopoverSection.allCases {
+            #expect(PopoverSection(argument: section.rawValue) == section)
+            #expect(PopoverSection(argument: section.rawValue.uppercased()) == section)
+        }
+        #expect(PopoverSection(argument: "nonsense") == nil)
+        // Cmd-1, Cmd-2, Cmd-3, in the order of the segmented control.
+        #expect(PopoverSection.allCases.map(\.shortcutKey) == ["1", "2", "3"])
     }
 }

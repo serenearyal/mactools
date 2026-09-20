@@ -22,6 +22,9 @@ struct SamplingConsumers: OptionSet, Sendable, Hashable {
 struct SamplingDemand: Equatable, Sendable {
     var consumers: SamplingConsumers = []
     var activeTab: MainTab = .overview
+    /// Which section of the popover is on screen. Only read while the popover
+    /// is a consumer.
+    var popoverSection: PopoverSection = .dashboard
     /// The window is on screen but another window covers it completely.
     ///
     /// It is not the same as hidden: the user can bring it back with one
@@ -36,11 +39,17 @@ struct SamplingDemand: Equatable, Sendable {
     /// hidden window is nobody looking.
     func showsTab(_ tab: MainTab) -> Bool { wantsWindow && activeTab == tab }
 
+    /// The same rule for the popover: a remembered section with the popover
+    /// closed is nobody looking either.
+    func showsPopoverSection(_ section: PopoverSection) -> Bool {
+        wantsPopover && popoverSection == section
+    }
+
     /// One line for the log, so a sampling leak can be read back afterwards.
     var summary: String {
         var names: [String] = []
         if wantsWindow { names.append("window(\(activeTab.rawValue))\(windowOccluded ? " covered" : "")") }
-        if wantsPopover { names.append("popover") }
+        if wantsPopover { names.append("popover(\(popoverSection.rawValue))") }
         return names.isEmpty ? "menu bar only" : names.joined(separator: " + ")
     }
 }
@@ -50,9 +59,9 @@ struct SamplingDemand: Equatable, Sendable {
 /// Pure by design: the stores hold the state and the timers, these rules are
 /// values in and values out, so the awkward part can be tested.
 enum SamplingPlan {
-    /// Everything the popover draws: CPU, memory, the boot volume and its
-    /// throughput, the labelled temperatures behind "hottest CPU" and "GPU",
-    /// the fans and `PSTR`.
+    /// Everything the Dashboard section draws: CPU, memory, the boot volume
+    /// and its throughput, the labelled temperatures behind "hottest CPU" and
+    /// "GPU", the fans and `PSTR`.
     static let popoverRequest = SampleRequest(
         cpu: true,
         memory: true,
@@ -62,6 +71,56 @@ enum SamplingPlan {
         fans: true,
         power: .system
     )
+
+    /// What one popover section shows, and nothing more.
+    ///
+    /// Tools draws one fan line; Windows draws no live number at all, so an
+    /// open popover on that section costs what a closed one costs.
+    static func popoverRequest(section: PopoverSection) -> SampleRequest {
+        switch section {
+        case .dashboard: popoverRequest
+        case .windows: .nothing
+        case .tools: SampleRequest(cpu: false, fans: true)
+        }
+    }
+
+    /// What one tab of the window shows, and nothing more.
+    ///
+    /// Only the CPU history is kept continuous across tabs, and the menu bar
+    /// request does that on its own: `SampleRequest()` always reads the CPU,
+    /// which is one `host_processor_info` call. Sensor, power and disk history
+    /// gap while their tab is off screen, which is what the graphs on those
+    /// tabs already show when the window has just been opened.
+    static func windowRequest(tab: MainTab, showsUnlabelledSensors: Bool) -> SampleRequest {
+        switch tab {
+        case .overview:
+            // Everything the cards draw. Not `.everything`: the Overview shows
+            // `PSTR` alone, the rail list is on Sensors.
+            SampleRequest(
+                cpu: true,
+                memory: true,
+                diskSpace: true,
+                diskIO: true,
+                temperatures: .labelled,
+                fans: true,
+                power: .system
+            )
+        case .sensors:
+            SampleRequest(
+                cpu: false,
+                temperatures: showsUnlabelledSensors ? .everything : .labelled,
+                power: .labelled
+            )
+        case .fans:
+            SampleRequest(cpu: false, temperatures: .labelled, fans: true)
+        case .storage:
+            SampleRequest(cpu: false, diskSpace: true, diskIO: true)
+        // The process table comes from `ProcessStore`, not from a metrics
+        // pass, and the five tabs after it show no live number at all.
+        case .processes, .windows, .keepAwake, .keyboardLock, .backlight, .settings:
+            .nothing
+        }
+    }
 
     /// 5 s, for an app whose menu bar label shows no number at all.
     static let idleInterval = Duration.seconds(5)
@@ -85,14 +144,15 @@ enum SamplingPlan {
             chosenSensorScope: chosenSensorScope
         )
         if demand.wantsPopover {
-            request.formUnion(popoverRequest)
+            request.formUnion(popoverRequest(section: demand.popoverSection))
         }
         if demand.wantsWindow {
-            var window = SampleRequest.everything
-            if demand.activeTab == .sensors, showsUnlabelledSensors {
-                window.temperatures = .everything
-            }
-            request.formUnion(window)
+            request.formUnion(
+                windowRequest(
+                    tab: demand.activeTab,
+                    showsUnlabelledSensors: showsUnlabelledSensors
+                )
+            )
         }
         return request
     }
@@ -127,32 +187,45 @@ enum SamplingPlan {
         return request
     }
 
-    /// The user's refresh interval while anything is on screen, 5 s for an
-    /// idle app whose label shows nothing and for a window nobody can see.
+    /// The user's refresh interval while a live number is on screen, 5 s for
+    /// an idle app whose label shows nothing and for a window nobody can see.
+    ///
+    /// A tab or a popover section that draws no live number does not raise the
+    /// cadence: the Windows tab in front of a menu bar label that shows
+    /// nothing costs the idle 5 s pass, not the user's 1 s.
     ///
     /// A covered window keeps its full request, so the graphs stay continuous
     /// and nothing is cleared; only the cadence drops.
     static func metricsInterval(
         demand: SamplingDemand,
         refreshSeconds: Double,
-        menuBarMetrics: [MenuBarMetric]
+        menuBarMetrics: [MenuBarMetric],
+        showsUnlabelledSensors: Bool = false
     ) -> Duration {
-        if demand.wantsPopover { return .seconds(refreshSeconds) }
-        if demand.wantsWindow {
+        if demand.wantsPopover, !popoverRequest(section: demand.popoverSection).readsNothing {
+            return .seconds(refreshSeconds)
+        }
+        let window = demand.wantsWindow
+            ? windowRequest(tab: demand.activeTab, showsUnlabelledSensors: showsUnlabelledSensors)
+            : .nothing
+        if !window.readsNothing {
             return demand.windowOccluded ? idleInterval : .seconds(refreshSeconds)
         }
         return menuBarMetrics.isEmpty ? idleInterval : .seconds(refreshSeconds)
     }
 
     /// The process table costs one libproc round trip per process, so it only
-    /// runs for somebody who is looking at it.
+    /// runs for somebody who is looking at it: its own tab, or the Dashboard
+    /// section of the popover.
     static func samplesProcesses(_ demand: SamplingDemand) -> Bool {
-        demand.showsTab(.processes) || demand.wantsPopover
+        demand.showsTab(.processes) || demand.showsPopoverSection(.dashboard)
     }
 
-    /// Fan snapshots go through the helper over XPC; the same rule applies.
+    /// Fan snapshots go through the helper over XPC; the same rule applies,
+    /// and the popover sections that show a fan are the ones that ask.
     static func pollsFans(_ demand: SamplingDemand) -> Bool {
-        demand.showsTab(.fans) || demand.wantsPopover
+        if demand.showsTab(.fans) { return true }
+        return demand.wantsPopover && popoverRequest(section: demand.popoverSection).fans
     }
 }
 
