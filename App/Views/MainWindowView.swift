@@ -13,9 +13,14 @@ struct MainWindowView: View {
             }
             .navigationSplitViewColumnWidth(min: 176, ideal: 192, max: 240)
         } detail: {
-            TabDetailView(tab: services.selectedTab, services: services)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .navigationTitle(services.selectedTab.title)
+            // Above every tab, not on one of them: a bundle in the wrong place
+            // breaks the helper, the keyboard lock and the storage scan alike.
+            VStack(spacing: 0) {
+                LaunchLocationBanner()
+                TabDetailView(tab: services.selectedTab, services: services)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle(services.selectedTab.title)
         }
         .frame(minWidth: 760, minHeight: 480)
     }
@@ -39,7 +44,7 @@ struct TabDetailView: View {
     var body: some View {
         switch tab {
         case .overview:
-            OverviewView(store: services.store, settings: services.settings)
+            OverviewView(services: services)
         case .fans:
             FansView(
                 store: services.store,
@@ -64,7 +69,9 @@ struct TabDetailView: View {
             SettingsTabView(
                 settings: services.settings,
                 store: services.store,
-                helper: services.helper
+                helper: services.helper,
+                setup: services.setup,
+                showOverview: { services.selectedTab = .overview }
             )
         }
     }

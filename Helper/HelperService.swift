@@ -53,44 +53,38 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
     /// against a fake. The daemon always builds itself through `init()`.
     private let requiresRoot: Bool
 
-    override convenience init() {
-        self.init(fanHardware: nil, requiresRoot: true)
+    /// The designated initializer. Everything this service talks to is handed
+    /// to it: it opens no SMC connection and looks for no fan by itself.
+    ///
+    /// That is deliberate. The one place the real hardware is built is
+    /// `HelperService.daemon()`, in a file only the helper target compiles, so
+    /// a test can never end up writing to a fan of this Mac by accident - not
+    /// even the unprivileged write that fails and logs.
+    init(
+        smc: SMCConnection?,
+        smcError: String?,
+        fanHardware: (any FanHardware)?,
+        fanError: String?,
+        requiresRoot: Bool
+    ) {
+        self.requiresRoot = requiresRoot
+        self.smc = smc
+        self.smcError = smcError
+        fans = fanHardware.map { FanCoordinator(hardware: $0) }
+        self.fanError = fans == nil ? (fanError ?? "the fans are not reachable") : nil
+        super.init()
     }
 
-    /// The designated initializer. `fanHardware` is nil in the daemon, where
-    /// the fans come from the SMC connection this opens.
-    init(fanHardware: (any FanHardware)?, requiresRoot: Bool) {
-        self.requiresRoot = requiresRoot
-        var connection: SMCConnection?
-        do {
-            connection = try SMCConnection()
-            smcError = nil
-        } catch {
-            connection = nil
-            smcError = error.description
-            HelperLog.logger.error("cannot open the SMC: \(error.description, privacy: .public)")
-        }
-        smc = connection
-
-        var hardware = fanHardware
-        var failure: String?
-        if hardware == nil {
-            if let connection {
-                do {
-                    hardware = try SMCFanHardware(smc: connection)
-                } catch {
-                    failure = error.description
-                }
-            } else {
-                failure = smcError
-            }
-        }
-        fans = hardware.map { FanCoordinator(hardware: $0) }
-        fanError = fans == nil ? (failure ?? "the fans are not reachable") : nil
-        if let failure {
-            HelperLog.logger.error("no fan control: \(failure, privacy: .public)")
-        }
-        super.init()
+    /// The service a test builds: fans that exist only in the caller's
+    /// process, and no SMC connection of any kind.
+    convenience init(fanHardware: any FanHardware, requiresRoot: Bool) {
+        self.init(
+            smc: nil,
+            smcError: "this build of the helper has no SMC connection",
+            fanHardware: fanHardware,
+            fanError: nil,
+            requiresRoot: requiresRoot
+        )
     }
 
     // MARK: - VentHelperProtocol

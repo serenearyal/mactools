@@ -6,7 +6,7 @@ import HelperProtocol
 // demand for the mach service and stays until the machine shuts down, so the
 // process has no idle timer of its own. The fan governor needs that, because
 // it keeps ticking between calls.
-let service = HelperService()
+let service = HelperService.daemon()
 
 // Order matters. Every fan is put back under firmware control (guarantee 3)
 // and the ways out are armed (guarantee 2) before the first client can ask

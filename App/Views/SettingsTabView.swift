@@ -5,10 +5,31 @@ struct SettingsTabView: View {
     @Bindable var settings: AppSettings
     let store: MetricsStore
     let helper: HelperController
+    let setup: SetupChecklist
+    /// Where "Show setup checklist" sends the user, since the card lives on
+    /// the Overview.
+    let showOverview: () -> Void
 
     var body: some View {
         Form {
             HelperSectionView(helper: helper)
+
+            Section {
+                launchAtLoginRow
+                // Never disabled, even while the card is on screen: the button
+                // is also how a user finds the checklist again, and landing
+                // on the Overview is the right answer either way.
+                Button("Show setup checklist") {
+                    setup.show()
+                    showOverview()
+                }
+            } header: {
+                Text("Startup")
+            } footer: {
+                Text("Vent only measures while it runs. The checklist on the Overview tracks the four permissions it asks for.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Section {
                 metricList
@@ -35,19 +56,35 @@ struct SettingsTabView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Appearance") {
+            Section {
+                Picker("Show in menu bar", selection: $settings.menuBarContent) {
+                    ForEach(MenuBarContent.allCases) { content in
+                        Text(content.title).tag(content)
+                    }
+                }
+                .pickerStyle(.segmented)
                 Picker("Label style", selection: $settings.labelStyle) {
                     ForEach(MenuBarLabelStyle.allCases) { style in
                         Text(style.title).tag(style)
                     }
                 }
+                .disabled(isIconOnly)
                 Toggle("Show icon", isOn: $settings.showMenuBarIcon)
                     .help("Hides the fan symbol to save room in a crowded menu bar")
+                    .disabled(isIconOnly)
                 Picker("Temperature unit", selection: $settings.temperatureUnit) {
                     ForEach(TemperatureUnit.allCases) { unit in
                         Text(unit.title).tag(unit)
                     }
                 }
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text(isIconOnly
+                    ? "Icon only shrinks the item to about 24 pt. On a notched Mac that is often the difference between an item you can see and one the system hides."
+                    : "The window keeps showing every metric; this is only what the menu bar has room for.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Sampling") {
@@ -70,6 +107,41 @@ struct SettingsTabView: View {
             }
         }
         .formStyle(.grouped)
+        // The user can remove the login item in System Settings while Vent is
+        // running, so the toggle reads the live status instead of a boolean of
+        // its own, here and on every activation.
+        .onAppear { setup.launchAtLogin.refresh() }
+    }
+
+    private var isIconOnly: Bool { settings.menuBarContent == .iconOnly }
+
+    @ViewBuilder
+    private var launchAtLoginRow: some View {
+        let login = setup.launchAtLogin
+        Toggle("Launch at login", isOn: Binding(
+            get: { login.status.isEnabled },
+            set: { wanted in Task { await login.setEnabled(wanted) } }
+        ))
+        .disabled(login.isBusy)
+
+        if let detail = login.status.detail {
+            HStack(alignment: .firstTextBaseline, spacing: Layout.gutter) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .frame(width: 20, alignment: .center)
+                Text(detail)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Layout.gutter)
+                Button("Open Login Items Settings") { login.openLoginItemsSettings() }
+            }
+        }
+        if let failure = login.failure {
+            Label(failure, systemImage: "exclamationmark.octagon.fill")
+                .foregroundStyle(.red)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var metricList: some View {

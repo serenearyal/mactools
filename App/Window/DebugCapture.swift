@@ -45,14 +45,26 @@ enum DebugCapture {
                 services: services,
                 to: base.appending(path: "status-\(tab)-\(suffix).txt")
             )
+            let cells = MenuBarLabel.cells(
+                snapshot: services.store.snapshot,
+                settings: services.settings
+            )
             for style in MenuBarLabelStyle.allCases {
                 captureLabel(
-                    services: services,
+                    cells: cells,
                     style: style,
                     dark: suffix == "dark",
                     to: base.appending(path: "menubar-\(style.rawValue)-\(suffix).png")
                 )
             }
+            // What "Show in menu bar: icon only" draws, without touching the
+            // setting: no cell at all is the whole mechanism.
+            captureLabel(
+                cells: [],
+                style: .twoLine,
+                dark: suffix == "dark",
+                to: base.appending(path: "menubar-icononly-\(suffix).png")
+            )
             if quit { NSApp.terminate(nil) }
         }
     }
@@ -103,8 +115,13 @@ enum DebugCapture {
         // scroll-free form for exactly this reason.
         let content = Group {
             if services.selectedTab == .overview {
-                OverviewCards(store: services.store, settings: services.settings, twoColumns: true)
-                    .padding(Layout.cardSpacing)
+                VStack(spacing: Layout.cardSpacing) {
+                    if services.setup.isVisible {
+                        SetupChecklistCard(checklist: services.setup)
+                    }
+                    OverviewCards(store: services.store, settings: services.settings, twoColumns: true)
+                }
+                .padding(Layout.cardSpacing)
             } else if services.selectedTab == .fans {
                 FansContent(
                     store: services.store,
@@ -143,7 +160,17 @@ enum DebugCapture {
                 return "label \(style.rawValue), icon \(icon ? "on" : "off"): \(String(format: "%.1f", width)) pt"
             }
         }
+        let iconOnlyWidth = ImageRenderer(
+            content: MenuBarLabelView(cells: [], style: .twoLine)
+        ).nsImage?.size.width ?? 0
         let lines = labelWidths + [
+            "label icon only: \(String(format: "%.1f", iconOnlyWidth)) pt",
+            "menu bar content: \(services.settings.menuBarContent.rawValue)",
+            "setup checklist visible: \(services.setup.isVisible)",
+            "setup steps open: \(services.setup.remaining)",
+            "launch at login: \(services.setup.launchAtLogin.status)",
+            "full disk access: \(services.setup.hasFullDiskAccess)",
+            "bundle in /Applications: \(LaunchLocationBanner.isInPlace)",
             "status item width: \(String(format: "%.1f", services.statusItemController?.itemWidth ?? 0)) pt",
             "status item image: \(services.statusItemController?.lastImageSize ?? .zero)",
             "status item window number: \(services.statusItemController?.itemWindowNumber ?? 0)",
@@ -207,12 +234,11 @@ enum DebugCapture {
 
     /// The template label on the background the menu bar would give it.
     private static func captureLabel(
-        services: AppServices,
+        cells: [MenuBarCell],
         style: MenuBarLabelStyle,
         dark: Bool,
         to url: URL
     ) {
-        let cells = MenuBarLabel.cells(snapshot: services.store.snapshot, settings: services.settings)
         let renderer = ImageRenderer(content: MenuBarLabelView(cells: cells, style: style))
         renderer.scale = 2
         guard let image = renderer.nsImage else { return }

@@ -12,6 +12,11 @@ import SysMetrics
 /// to it through a real `NSXPCConnection`. That covers the interface, the
 /// delegate, the reply blocks and the privilege gate; what it cannot cover is
 /// launchd and the mach service name.
+///
+/// `requiresRoot: true`, which is what the daemon demands, over fans that
+/// exist only in this process. No test in this bundle can reach the SMC fans
+/// of the machine: `HelperService.daemon()` is the only thing that builds
+/// them, and it lives in a file the test target does not compile.
 final class HelperXPCTests: XCTestCase {
     private var listener: NSXPCListener!
     private var delegate: HelperListenerDelegate!
@@ -19,7 +24,11 @@ final class HelperXPCTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        delegate = HelperListenerDelegate(service: HelperService())
+        let service = HelperService(
+            fanHardware: InMemoryFanHardware.macBookPro(),
+            requiresRoot: true
+        )
+        delegate = HelperListenerDelegate(service: service)
         listener = NSXPCListener.anonymous()
         listener.delegate = delegate
         listener.resume()
@@ -112,9 +121,9 @@ final class HelperXPCTests: XCTestCase {
 /// exist only in this process.
 ///
 /// The service is built with `requiresRoot: false` here, which is the one
-/// thing the daemon never does: `HelperService()` always demands root. That
-/// is what lets a normal user run the whole XPC path, the JSON payloads and
-/// the governor rules without a daemon and without a fan.
+/// thing the daemon never does: `HelperService.daemon()` always demands root.
+/// That is what lets a normal user run the whole XPC path, the JSON payloads
+/// and the governor rules without a daemon and without a fan.
 final class HelperFanXPCTests: XCTestCase {
     private var listener: NSXPCListener!
     private var delegate: HelperListenerDelegate!

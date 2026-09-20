@@ -107,6 +107,12 @@ final class StorageStore {
         guard !isScanning else { return }
         if let root { self.root = (root as NSString).expandingTildeInPath }
         hasFullDiskAccess = FullDiskAccess.isGranted()
+        AppLog.scan.notice(
+            """
+            scan started on \(self.root, privacy: .private), \
+            full disk access \(self.hasFullDiskAccess, privacy: .public)
+            """
+        )
         message = nil
         progress = nil
         isScanning = true
@@ -125,6 +131,7 @@ final class StorageStore {
                     finish(value)
                 case .failed(let error):
                     message = error.description
+                    AppLog.scan.error("scan failed: \(error.description, privacy: .public)")
                 }
             }
             guard let self else { return }
@@ -134,11 +141,22 @@ final class StorageStore {
         }
     }
 
+    /// Safe at any time, including from the quit path: with no scan running it
+    /// does nothing at all.
     func cancelScan() {
-        coordinator?.cancel()
+        guard let coordinator else { return }
+        AppLog.scan.notice("scan cancelled")
+        coordinator.cancel()
     }
 
     private func finish(_ result: ScanResult) {
+        AppLog.scan.notice(
+            """
+            scan finished: \(result.tally.files, privacy: .public) files, \
+            \(result.tally.allocated, privacy: .public) bytes, \
+            cancelled \(result.wasCancelled, privacy: .public)
+            """
+        )
         apply(result)
         let cache = cache
         let root = root
@@ -188,6 +206,14 @@ final class StorageStore {
         guard !victims.isEmpty else { return }
         let freed = victims.reduce(0) { $0 + $1.allocated }
         let outcome = TrashService.trash(victims.map(\.path))
+        for path in outcome.trashed.keys {
+            AppLog.scan.notice("moved to the Trash: \(path, privacy: .private)")
+        }
+        for (path, reason) in outcome.failed {
+            AppLog.scan.error(
+                "could not trash \(path, privacy: .private): \(reason, privacy: .public)"
+            )
+        }
 
         rows.removeAll { outcome.trashed.keys.contains($0.path) }
         selection.subtract(outcome.trashed.keys)

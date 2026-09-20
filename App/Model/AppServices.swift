@@ -13,9 +13,11 @@ final class AppServices {
     let store: MetricsStore
     let processes = ProcessStore()
     let storage = StorageStore()
-    let helper = HelperController()
+    let helper: HelperController
     let fans: FanStore
     let keyboardLock: KeyboardLockController
+    /// The first-run checklist and the login item behind it.
+    let setup: SetupChecklist
     let windowController = MainWindowController()
     /// Set by the app delegate once the status item exists.
     @ObservationIgnored var statusItemController: StatusItemController?
@@ -45,7 +47,11 @@ final class AppServices {
             backend: fake ? DebugFanBackend() : HelperFanBackend(),
             persistsModes: !fake
         )
-        keyboardLock = KeyboardLockController(settings: settings)
+        let keyboardLock = KeyboardLockController(settings: settings)
+        self.keyboardLock = keyboardLock
+        let helper = HelperController()
+        self.helper = helper
+        setup = SetupChecklist(settings: settings, helper: helper, lock: keyboardLock)
         windowController.store = store
         windowController.processes = processes
     }

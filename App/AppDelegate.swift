@@ -12,7 +12,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         let services = AppServices.shared
+        AppLog.app.notice(
+            """
+            Vent \(HelperBundle.version, privacy: .public) started from \
+            \(Bundle.main.bundlePath, privacy: .private)
+            """
+        )
+        if !LaunchLocationBanner.isInPlace {
+            AppLog.app.error("not running from /Applications; the helper and the TCC grants are bound to this path")
+        }
         services.store.start()
+        // The four grants of the setup card are granted in System Settings, so
+        // every return to the front is a reason to read them again.
+        services.setup.observeActivation()
+        services.setup.refresh()
         // One pass at launch, so a fan mode the user chose last time is back
         // before the window is even opened. The helper deliberately forgot it.
         Task { await services.fans.refresh() }
@@ -27,12 +40,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyLaunchArguments(services: services)
     }
 
-    /// Last chance to give the keyboard and the fans back. A locked keyboard
-    /// that outlives the app would need a reboot, and a forced fan would keep
-    /// running until the helper noticed the connection was gone.
+    /// Last chance to give the keyboard, the fans and the disk back.
+    ///
+    /// The order is the order of the damage. A locked keyboard that outlives
+    /// the app would leave the user unable to type, so it goes first and
+    /// synchronously. A running scan holds a thread that walks the volume, so
+    /// it is told to stop before anything blocks. The fans go last, with a
+    /// bounded wait: the helper restores Auto by itself when this connection
+    /// dies, so this is a courtesy that makes it immediate, never a promise
+    /// the quit path depends on.
     func applicationWillTerminate(_ notification: Notification) {
-        AppServices.shared.keyboardLock.releaseForTermination()
-        AppServices.shared.fans.restoreAllAutoOnTermination()
+        let services = AppServices.shared
+        AppLog.app.notice("terminating: keyboard released, scan cancelled, fans back to Auto")
+        services.keyboardLock.releaseForTermination()
+        services.storage.cancelScan()
+        services.fans.restoreAllAutoOnTermination()
     }
 
     /// Closing the window leaves the status item running.
@@ -60,6 +82,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if arguments.contains("--show-window") {
             services.windowController.show()
+        }
+        // `--setup-checklist show|hide` draws the Overview with and without
+        // the setup card for a screenshot run, and writes nothing: what the
+        // user chose stays as it is.
+        if let index = arguments.firstIndex(of: "--setup-checklist"), index + 1 < arguments.count {
+            services.setup.setVisibilityOverride(arguments[index + 1].lowercased() != "hide")
         }
         // `--processes-sort name` opens the table on another column, so a
         // capture run can check that the order of a column that does not

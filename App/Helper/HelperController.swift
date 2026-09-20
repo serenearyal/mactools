@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import os
 
 import HelperProtocol
 
@@ -15,6 +14,12 @@ enum HelperState: Equatable, Sendable {
     /// install keeps a copy of the binary, and that copy goes stale.
     case outdated(installed: String, expected: String)
     case failed(String)
+
+    /// The one state in which everything that needs root works.
+    var isRunning: Bool {
+        if case .running = self { return true }
+        return false
+    }
 }
 
 /// Owns the helper: its state, the two installers and the XPC connection.
@@ -35,10 +40,7 @@ final class HelperController {
     @ObservationIgnored private let serviceManagement = SMAppServiceInstaller()
     @ObservationIgnored private let legacy = LegacyHelperInstaller()
     @ObservationIgnored private let connection = HelperConnection()
-    @ObservationIgnored private let log = Logger(
-        subsystem: HelperConstants.appBundleIdentifier,
-        category: "helper"
-    )
+    @ObservationIgnored private let log = AppLog.helper
 
     var expectedVersion: String { HelperBundle.version }
 

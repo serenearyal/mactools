@@ -3,7 +3,6 @@ import ApplicationServices
 import Carbon
 import Foundation
 import Observation
-import os
 
 /// What the lock is doing right now.
 enum KeyboardLockState: Equatable {
@@ -65,10 +64,7 @@ final class KeyboardLockController {
     /// `AppServices.shared`, and an observer that outlives a lock is the
     /// point of them.
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
-    @ObservationIgnored private let log = Logger(
-        subsystem: "com.serenearyal.vent",
-        category: "lock"
-    )
+    @ObservationIgnored private let log = AppLog.lock
 
     init(settings: AppSettings) {
         self.settings = settings

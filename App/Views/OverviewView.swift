@@ -4,20 +4,31 @@ import SwiftUI
 import SysMetrics
 
 struct OverviewView: View {
-    let store: MetricsStore
-    let settings: AppSettings
+    let services: AppServices
 
     var body: some View {
         GeometryReader { proxy in
             ScrollView {
-                OverviewCards(
-                    store: store,
-                    settings: settings,
-                    twoColumns: proxy.size.width >= Layout.twoColumnWidth
-                )
+                // The setup card goes above the grid and pushes nothing out of
+                // shape: the four cards keep their own height, and the tab
+                // scrolls while the card is there. Dismissed, the layout is
+                // the 2 x 2 grid that fits a 900 x 600 window exactly as it
+                // did before.
+                VStack(spacing: Layout.cardSpacing) {
+                    if services.setup.isVisible {
+                        SetupChecklistCard(checklist: services.setup)
+                    }
+                    OverviewCards(
+                        store: services.store,
+                        settings: services.settings,
+                        twoColumns: proxy.size.width >= Layout.twoColumnWidth
+                    )
+                }
                 .padding(Layout.cardSpacing)
             }
+            .scrollBounceBehavior(.basedOnSize)
         }
+        .onAppear { services.setup.refresh() }
     }
 }
 

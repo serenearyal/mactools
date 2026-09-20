@@ -19,7 +19,10 @@ enum MenuBarLabel {
     static let placeholder = "--"
 
     static func cells(snapshot: MetricsSnapshot, settings: AppSettings) -> [MenuBarCell] {
-        settings.menuBarMetrics.map { metric in
+        // Icon only: no cell at all, and the label falls back to the bare
+        // symbol. It is the whole mechanism behind the setting.
+        guard settings.menuBarContent == .metrics else { return [] }
+        return settings.menuBarMetrics.map { metric in
             MenuBarCell(
                 metric: metric,
                 caption: caption(for: metric, settings: settings),
@@ -104,6 +107,10 @@ extension SensorCategory {
 enum MenuBarMetrics {
     static let height: CGFloat = 20
     static let iconSize: CGFloat = 10
+    /// On its own the symbol carries the whole item, so it is drawn at the
+    /// size the other icons of the menu bar use rather than the small size
+    /// that sits next to a two-line cell.
+    static let soloIconSize: CGFloat = 13
     /// The menu bar of a notched Mac is short, so every point counts.
     static let cellSpacing: CGFloat = 4
     static let iconSpacing: CGFloat = 3
@@ -169,7 +176,10 @@ struct MenuBarLabelView: View {
         HStack(spacing: MenuBarMetrics.iconSpacing) {
             if showIcon || cells.isEmpty {
                 Image(systemName: "fan")
-                    .font(.system(size: MenuBarMetrics.iconSize, weight: .medium))
+                    .font(.system(
+                        size: cells.isEmpty ? MenuBarMetrics.soloIconSize : MenuBarMetrics.iconSize,
+                        weight: .medium
+                    ))
             }
             if !cells.isEmpty {
                 HStack(spacing: MenuBarMetrics.cellSpacing) {

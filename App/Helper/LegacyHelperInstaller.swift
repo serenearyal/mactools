@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 import HelperProtocol
 
@@ -15,7 +14,7 @@ import HelperProtocol
 final class LegacyHelperInstaller: HelperInstalling {
     let kind = HelperInstallerKind.legacy
 
-    private let log = Logger(subsystem: HelperConstants.appBundleIdentifier, category: "helper")
+    private let log = AppLog.helper
 
     func state() -> HelperInstallState {
         let manager = FileManager.default

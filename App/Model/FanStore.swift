@@ -1,7 +1,6 @@
 import FanControl
 import Foundation
 import Observation
-import os
 
 import HelperProtocol
 
@@ -54,14 +53,13 @@ final class FanStore {
     @ObservationIgnored private let persistsModes: Bool
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var hasApplied = false
-    @ObservationIgnored private let log = Logger(
-        subsystem: HelperConstants.appBundleIdentifier,
-        category: "fans"
-    )
+    @ObservationIgnored private let log = AppLog.fans
 
     /// While the tab is open. The helper reads the SMC for every snapshot, so
     /// this is the same cost as one line of the Sensors tab.
     private static let pollInterval: Duration = .seconds(2)
+    /// How long the quit path waits for the helper to confirm Auto.
+    private static let terminationWait: DispatchTimeInterval = .seconds(1)
 
     init(settings: AppSettings, backend: any FanBackend, persistsModes: Bool = true) {
         self.settings = settings
@@ -157,6 +155,11 @@ final class FanStore {
 
     /// Best effort on the way out. The helper covers a crash by itself, this
     /// covers the ordinary quit and gets there before the connection dies.
+    ///
+    /// The wait is bounded at one second. macOS gives a terminating app only a
+    /// few seconds in total, and the last-client-leaves guarantee in the
+    /// helper covers everything this call misses, so blocking longer would
+    /// trade a visible hang for nothing.
     func restoreAllAutoOnTermination() {
         let backend = self.backend
         let semaphore = DispatchSemaphore(value: 0)
@@ -164,7 +167,9 @@ final class FanStore {
             try? await backend.restoreAllAuto()
             semaphore.signal()
         }
-        _ = semaphore.wait(timeout: .now() + 2)
+        if semaphore.wait(timeout: .now() + FanStore.terminationWait) == .timedOut {
+            log.error("the helper did not confirm Auto in time; the connection dropping restores it")
+        }
     }
 
     // MARK: - Re-applying what the user chose

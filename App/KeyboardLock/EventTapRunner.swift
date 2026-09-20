@@ -25,7 +25,7 @@ enum EventTapFailure: Error, Equatable {
 final class EventTapRunner: @unchecked Sendable {
     /// Called from the tap thread when the Escape chord completes.
     private let onChord: @Sendable () -> Void
-    private let log = Logger(subsystem: "com.serenearyal.vent", category: "lock")
+    private let log = AppLog.lock
 
     private let lock = NSLock()
     private var machPort: CFMachPort?

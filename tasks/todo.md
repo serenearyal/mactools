@@ -50,8 +50,8 @@ Each batch must end with `make build && make test` green.
 - [x] **B6 Processes (helper-backed rows need the installed helper to verify):** helper snapshot merge, sortable/searchable table, top CPU and top memory lists, quit/force quit with confirmation. Verify: `kernel_task` and `WindowServer` show real values with the helper, a dash without it.
 - [x] **B7 Storage:** heap, walker, coordinator, cache, volume view, largest-files table. Heap test against brute-force sort. Verify: scan with and without Full Disk Access, cancel in 1 s, UI stays responsive, top result matches `du`, no iCloud download starts.
 - [x] **B8 Keyboard lock (code; live lock test by the user is open):** controller, overlay windows, permission onboarding. Verify manually: all keys and media keys dead, mouse works, all 3 unlock paths work, a short tap does not unlock, app kill restores the keyboard, still locked after 5 minutes, refuses during Secure Input.
-- [ ] **B9 Hardening:** launch at login (`SMAppService.loginItem`), first-run permission onboarding, `Logger` with privacy annotations, crash matrix (kill, logout, restart for each fan mode and lock state), README.
-- [ ] **Review section** added to `tasks/todo.md` at the end.
+- [x] **B9 Hardening (crash matrix is a manual check by the user):** launch at login (`SMAppService.loginItem`), first-run permission onboarding, `Logger` with privacy annotations, crash matrix (kill, logout, restart for each fan mode and lock state), README.
+- [x] **Review section** added below.
 
 Estimate at AI agent speed: about 30-60 minutes of agent work for each batch, B4 and B5 longer because of manual hardware checks.
 Your actions that I cannot do: admin password / Login Items approval for the helper, Accessibility + Input Monitoring + Full Disk Access grants, and the physical keyboard check in B8.
@@ -69,3 +69,39 @@ Your actions that I cannot do: admin password / Login Items approval for the hel
 - `SMAppService` refuses the Apple Development certificate: legacy installer is built in B4, same protocol.
 - TCC grants break when the app path or signature changes: always install to `/Applications`, never ad-hoc sign.
 - Private SMC writes make the app not eligible for the App Store: direct distribution only.
+
+## Review (2026-09-20)
+
+### Done and verified
+- All 10 batches are built and committed on `main`.
+- 192 unit tests and 60 integration tests pass, with 1 root-only test skipped and zero Swift warnings.
+- SMC reads match the hardware facts: 2038 keys, 2 fans, 25 labelled sensors.
+- CPU, memory, disk and process numbers match `top`, `vm_stat`, `df` and `diskutil`.
+- The full-disk scan counted 3.59 M files in 172 s with 17 MB peak memory, and the top files match `find` + `stat`.
+- The scan did not download iCloud placeholders (123 before, 123 after).
+- Idle CPU of the Release build with the window closed is about 0.6 %.
+- Each tab was checked on real window screenshots in light and dark mode.
+- The XPC requirement strings accept the correct binaries and reject ad-hoc re-signed copies.
+
+### Not verified (needs the user)
+- Helper installation with `SMAppService` and the Apple Development certificate, or the legacy fallback.
+- All fan writes on real hardware: `ventctl selftest-fans`, the `kill -9` restore, helper SIGTERM, sleep/wake, curve under load, reboot.
+- Helper-backed process rows and Force Quit of a root-owned process.
+- A live keyboard lock (Accessibility and Input Monitoring are not granted).
+- A storage scan from the app with Full Disk Access.
+- Launch at login registration.
+- The crash matrix in the README.
+
+### Deviations from the plan
+- The key catalog load is 0.8 s, not 0.38 s, so the app never loads it at launch.
+- The chip is 6P+2E, and `Tp0T` is an efficiency core.
+- The slew limit applies to curve mode only; a constant RPM is written at once.
+- A fan fault clears the desired mode of that fan, so a broken configuration is not rewritten every 2 s.
+- The Overview has no "Top processes" card, because a fifth card does not fit the 900x600 grid.
+- The Processes tab has no threads column, because the count is not available cheaply for all processes.
+- The icon-only menu bar item is about 36 pt, because macOS adds about 16 pt of padding.
+
+### Known limits
+- On a MacBook with a notch and a full menu bar, macOS hides the status item. Start Vent again to open the window, or use the icon-only mode.
+- Without Full Disk Access, a home-folder scan can stop at a macOS consent prompt.
+- The app is not notarized, because there is no Developer ID certificate.

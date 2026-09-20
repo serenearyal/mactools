@@ -85,6 +85,25 @@ enum MenuBarLabelStyle: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
+/// How much room the status item takes in the menu bar.
+///
+/// A notched Mac hides everything that does not fit behind the notch, without
+/// a word, and a Vent label with three metrics is wide. Icon only shrinks the
+/// item to about 24 pt, which is what a crowded menu bar has left.
+enum MenuBarContent: String, CaseIterable, Codable, Identifiable, Sendable {
+    case metrics
+    case iconOnly
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .metrics: "Metrics"
+        case .iconOnly: "Icon only"
+        }
+    }
+}
+
 enum TemperatureUnit: String, CaseIterable, Codable, Identifiable, Sendable {
     case celsius
     case fahrenheit
@@ -128,6 +147,8 @@ struct SettingsData: Codable, Equatable, Sendable {
     var menuBarMetrics: [MenuBarMetric] = [.cpuUsage, .cpuTemperature]
     var labelStyle: MenuBarLabelStyle = .twoLine
     var showMenuBarIcon: Bool = true
+    /// Metrics by default; icon only is the way out of a full menu bar.
+    var menuBarContent: MenuBarContent = .metrics
     var refreshInterval: RefreshInterval = .twoSeconds
     var temperatureUnit: TemperatureUnit = .celsius
     /// FourCC of the sensor behind `MenuBarMetric.sensorTemperature`. The
@@ -140,6 +161,9 @@ struct SettingsData: Codable, Equatable, Sendable {
     /// every mode as soon as the last client leaves, so this is the only
     /// memory the choice has.
     var fanModes: [String: FanMode] = [:]
+    /// False until the user closes the setup card on the Overview. The
+    /// Settings tab brings it back.
+    var setupChecklistDismissed: Bool = false
 
     init() {}
 
@@ -154,6 +178,8 @@ struct SettingsData: Codable, Equatable, Sendable {
             ?? fallback.labelStyle
         showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon)
             ?? fallback.showMenuBarIcon
+        menuBarContent = try container.decodeIfPresent(MenuBarContent.self, forKey: .menuBarContent)
+            ?? fallback.menuBarContent
         refreshInterval = try container.decodeIfPresent(RefreshInterval.self, forKey: .refreshInterval)
             ?? fallback.refreshInterval
         temperatureUnit = try container.decodeIfPresent(TemperatureUnit.self, forKey: .temperatureUnit)
@@ -167,6 +193,8 @@ struct SettingsData: Codable, Equatable, Sendable {
         )
         fanModes = try container.decodeIfPresent([String: FanMode].self, forKey: .fanModes)
             ?? fallback.fanModes
+        setupChecklistDismissed = try container.decodeIfPresent(Bool.self, forKey: .setupChecklistDismissed)
+            ?? fallback.setupChecklistDismissed
     }
 }
 
@@ -201,6 +229,16 @@ final class AppSettings {
     var showMenuBarIcon: Bool {
         get { data.showMenuBarIcon }
         set { data.showMenuBarIcon = newValue; persist() }
+    }
+
+    var menuBarContent: MenuBarContent {
+        get { data.menuBarContent }
+        set { data.menuBarContent = newValue; persist() }
+    }
+
+    var setupChecklistDismissed: Bool {
+        get { data.setupChecklistDismissed }
+        set { data.setupChecklistDismissed = newValue; persist() }
     }
 
     var refreshInterval: RefreshInterval {

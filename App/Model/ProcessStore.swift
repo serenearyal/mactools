@@ -164,6 +164,15 @@ final class ProcessStore {
         rows = sample.rows.map { ProcessTableRow(info: $0, userName: names.name(for: $0.uid)) }
         restrictedCount = ProcessTable.restrictedCount(rows)
         helperRowCount = sample.helperRows
+        // Only the transitions, so a helper that is not installed does not
+        // write a line every three seconds.
+        if sample.helperFailure != helperFailure {
+            if let failure = sample.helperFailure {
+                AppLog.procs.error("the helper did not answer: \(failure, privacy: .public)")
+            } else {
+                AppLog.procs.notice("the helper filled in \(sample.helperRows, privacy: .public) rows")
+            }
+        }
         helperFailure = sample.helperFailure
         // A process that ended keeps no place in the selection, so the next
         // Quit cannot land on a pid the kernel has handed to somebody else.
@@ -188,6 +197,14 @@ final class ProcessStore {
                 let failure: String? = row.uid == ProcessStore.currentUID
                     ? ProcessSignalPolicy.send(pid: row.pid, signal: signal.rawValue)
                     : await feed.signal(signal, pid: row.pid)
+                // The name is the user's business, the outcome is the app's:
+                // this is the one action of the tab that ends somebody's work.
+                AppLog.procs.notice(
+                    """
+                    \(signal.name, privacy: .public) to \(row.name, privacy: .private) \
+                    pid \(row.pid, privacy: .public): \(failure ?? "sent", privacy: .public)
+                    """
+                )
                 if let failure {
                     failures.append("\(row.name) (pid \(row.pid)): \(failure)")
                 }

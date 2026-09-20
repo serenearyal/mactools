@@ -134,6 +134,10 @@ targets:
       # The rules that decide when the keyboard comes back. Pure Swift with
       # no AppKit, so the tests share the app's copy instead of a rewrite.
       - App/KeyboardLock/KeyboardLockPolicy.swift
+      # The login-item status mapping, so the launch-at-login toggle can be
+      # checked without registering anything with launchd.
+      - App/Model/LaunchAtLogin.swift
+      - App/Model/AppLog.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.integration-tests
