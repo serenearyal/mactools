@@ -1,0 +1,215 @@
+import AppKit
+import SwiftUI
+
+/// Self-capture for the UI checks of a build agent.
+///
+/// `screencapture` needs Screen Recording permission, which a headless run
+/// does not have. An app may always draw its own views, so these paths write
+/// the window and the menu bar label to PNG files with no permission at all.
+///
+/// Every path is off unless the matching launch argument is present:
+/// `--capture <directory> [--appearance dark|light] [--capture-delay 8]
+/// [--capture-quit]`.
+@MainActor
+enum DebugCapture {
+    static func run(arguments: [String], services: AppServices) {
+        if let appearance = value(of: "--appearance", in: arguments) {
+            NSApp.appearance = NSAppearance(
+                named: appearance == "dark" ? .darkAqua : .aqua
+            )
+        }
+        guard let directory = value(of: "--capture", in: arguments) else { return }
+        let delay = value(of: "--capture-delay", in: arguments).flatMap(Double.init) ?? 8
+        let quit = arguments.contains("--capture-quit")
+        let suffix = value(of: "--appearance", in: arguments) ?? "light"
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            let base = URL(filePath: directory, directoryHint: .isDirectory)
+            try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+
+            let tab = services.selectedTab.rawValue
+            capture(
+                window: services.windowController.attachedWindow,
+                to: base.appending(path: "window-\(tab)-\(suffix).png")
+            )
+            captureDetail(
+                services: services,
+                dark: suffix == "dark",
+                to: base.appending(path: "detail-\(tab)-\(suffix).png")
+            )
+            writeStatus(
+                services: services,
+                to: base.appending(path: "status-\(tab)-\(suffix).txt")
+            )
+            for style in MenuBarLabelStyle.allCases {
+                captureLabel(
+                    services: services,
+                    style: style,
+                    dark: suffix == "dark",
+                    to: base.appending(path: "menubar-\(style.rawValue)-\(suffix).png")
+                )
+            }
+            if quit { NSApp.terminate(nil) }
+        }
+    }
+
+    private static func value(of name: String, in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else {
+            return nil
+        }
+        return arguments[index + 1].lowercased()
+    }
+
+    /// The layer tree of the theme frame, title bar included. SwiftUI hosts
+    /// most of its content in layers the process cannot read back, so this is
+    /// a best effort; `captureDetail` is the one that shows the content.
+    private static func capture(window: NSWindow?, to url: URL) {
+        guard let view = window?.contentView?.superview ?? window?.contentView,
+              let layer = view.layer
+        else { return }
+        let bounds = view.bounds
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(bounds.width * 2),
+            pixelsHigh: Int(bounds.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return }
+        rep.size = bounds.size
+
+        NSGraphicsContext.saveGraphicsState()
+        if let context = NSGraphicsContext(bitmapImageRep: rep) {
+            NSGraphicsContext.current = context
+            layer.render(in: context.cgContext)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        write(rep, to: url)
+    }
+
+    /// The detail pane on its own, drawn by `ImageRenderer` at the size it
+    /// has in a 900 x 600 window.
+    private static func captureDetail(services: AppServices, dark: Bool, to url: URL) {
+        // A macOS `ScrollView`, `Table` and `List` are AppKit views, and
+        // `ImageRenderer` draws nothing for them. The overview has a
+        // scroll-free form for exactly this reason.
+        let content = Group {
+            if services.selectedTab == .overview {
+                OverviewCards(store: services.store, settings: services.settings, twoColumns: true)
+                    .padding(Layout.cardSpacing)
+            } else {
+                TabDetailView(tab: services.selectedTab, services: services)
+            }
+        }
+        .frame(width: 708, height: 572)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .environment(services)
+        .environment(\.colorScheme, dark ? .dark : .light)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        guard let image = renderer.cgImage else { return }
+        write(NSBitmapImageRep(cgImage: image), to: url)
+    }
+
+    /// What the window and the app are doing, since a build agent cannot see
+    /// the screen.
+    private static func writeStatus(services: AppServices, to url: URL) {
+        let window = services.windowController.attachedWindow
+        let snapshot = services.store.snapshot
+        let cells = MenuBarLabel.cells(snapshot: snapshot, settings: services.settings)
+        let labelWidths = MenuBarLabelStyle.allCases.flatMap { style in
+            [true, false].map { icon in
+                let renderer = ImageRenderer(
+                    content: MenuBarLabelView(cells: cells, style: style, showIcon: icon)
+                )
+                let width = renderer.nsImage?.size.width ?? 0
+                return "label \(style.rawValue), icon \(icon ? "on" : "off"): \(String(format: "%.1f", width)) pt"
+            }
+        }
+        let lines = labelWidths + [
+            "status item width: \(String(format: "%.1f", services.statusItemController?.itemWidth ?? 0)) pt",
+            "status item image: \(services.statusItemController?.lastImageSize ?? .zero)",
+            "status item window number: \(services.statusItemController?.itemWindowNumber ?? 0)",
+            "window number: \(window?.windowNumber ?? 0)",
+            "app active: \(NSApp.isActive)",
+            "activation policy: \(NSApp.activationPolicy().rawValue)",
+            "window: \(window.map { "\($0.frame)" } ?? "none")",
+            "window visible: \(window?.isVisible ?? false)",
+            "window key: \(window?.isKeyWindow ?? false)",
+            "window main: \(window?.isMainWindow ?? false)",
+            "sensors: \(snapshot.temperatures.count)",
+            "fans: \(snapshot.fans.count)",
+            "power rails: \(snapshot.power.count)",
+            "volumes: \(snapshot.volumes.count)",
+            "cpu sample: \(snapshot.cpu != nil)",
+            "memory sample: \(snapshot.memory != nil)",
+            "disk io sample: \(snapshot.diskIO != nil)",
+            "history cpu points: \(services.store.history.cpuTotal.count)",
+        ]
+        try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// The template label on the background the menu bar would give it.
+    private static func captureLabel(
+        services: AppServices,
+        style: MenuBarLabelStyle,
+        dark: Bool,
+        to url: URL
+    ) {
+        let cells = MenuBarLabel.cells(snapshot: services.store.snapshot, settings: services.settings)
+        let renderer = ImageRenderer(content: MenuBarLabelView(cells: cells, style: style))
+        renderer.scale = 2
+        guard let image = renderer.nsImage else { return }
+        image.isTemplate = true
+
+        // A template image is tinted by the control that draws it, so the
+        // preview has to do the same before it composites.
+        let tinted = NSImage(size: image.size)
+        tinted.lockFocus()
+        image.draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
+        (dark ? NSColor.white : NSColor.black).set()
+        NSRect(origin: .zero, size: image.size).fill(using: .sourceAtop)
+        tinted.unlockFocus()
+
+        let padding = CGSize(width: 16, height: 6)
+        let size = CGSize(
+            width: image.size.width + padding.width * 2,
+            height: 24 + padding.height * 2
+        )
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width * 2),
+            pixelsHigh: Int(size.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return }
+        rep.size = size
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        (dark ? NSColor(white: 0.13, alpha: 1) : NSColor(white: 0.96, alpha: 1)).setFill()
+        NSRect(origin: .zero, size: size).fill()
+        tinted.draw(
+            at: NSPoint(x: padding.width, y: (size.height - image.size.height) / 2),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        write(rep, to: url)
+    }
+
+    private static func write(_ rep: NSBitmapImageRep, to url: URL) {
+        guard let data = rep.representation(using: .png, properties: [:]) else { return }
+        try? data.write(to: url)
+    }
+}

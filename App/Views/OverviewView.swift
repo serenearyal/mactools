@@ -1,0 +1,365 @@
+import Charts
+import SMCKit
+import SwiftUI
+import SysMetrics
+
+struct OverviewView: View {
+    let store: MetricsStore
+    let settings: AppSettings
+
+    var body: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                OverviewCards(
+                    store: store,
+                    settings: settings,
+                    twoColumns: proxy.size.width >= Layout.twoColumnWidth
+                )
+                .padding(Layout.cardSpacing)
+            }
+        }
+    }
+}
+
+/// The cards on their own, without the scroll view, so the capture path can
+/// render them. A plain `Grid` rather than a lazy one: four cards, all of
+/// them on screen.
+struct OverviewCards: View {
+    let store: MetricsStore
+    let settings: AppSettings
+    let twoColumns: Bool
+
+    @ViewBuilder
+    var body: some View {
+        if twoColumns {
+            Grid(horizontalSpacing: Layout.cardSpacing, verticalSpacing: Layout.cardSpacing) {
+                GridRow(alignment: .top) {
+                    CPUCard(store: store)
+                    MemoryCard(snapshot: store.snapshot, history: store.history)
+                }
+                GridRow(alignment: .top) {
+                    StorageCard(snapshot: store.snapshot, history: store.history)
+                    ThermalsCard(snapshot: store.snapshot, settings: settings)
+                }
+            }
+        } else {
+            VStack(spacing: Layout.cardSpacing) {
+                CPUCard(store: store)
+                MemoryCard(snapshot: store.snapshot, history: store.history)
+                StorageCard(snapshot: store.snapshot, history: store.history)
+                ThermalsCard(snapshot: store.snapshot, settings: settings)
+            }
+        }
+    }
+}
+
+// MARK: - CPU
+
+private struct CPUCard: View {
+    let store: MetricsStore
+
+    private var total: Double { store.snapshot.cpu?.total.percent ?? 0 }
+
+    var body: some View {
+        Card(title: "CPU", symbolName: "cpu") {
+            HStack(alignment: .firstTextBaseline, spacing: Layout.gutter) {
+                Text(store.snapshot.cpu == nil ? "--" : Fmt.compactPercent(total))
+                    .font(.system(size: 28, weight: .semibold))
+                    .monospacedDigit()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("user \(Fmt.percent(store.snapshot.cpu?.total.user ?? 0, fractionDigits: 1))")
+                    Text("system \(Fmt.percent(store.snapshot.cpu?.total.system ?? 0, fractionDigits: 1))")
+                }
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Text("\(store.topology.performanceCount)P + \(store.topology.efficiencyCount)E")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // These two heights decide whether all four cards fit in the
+            // 900 x 600 default window without scrolling.
+            HistoryAreaChart(values: Array(store.history.cpuTotal))
+                .frame(height: 76)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Per core")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                coreChart
+                    .frame(height: 66)
+            }
+        }
+    }
+
+    private var cores: [CoreLoad] {
+        guard let cpu = store.snapshot.cpu else { return [] }
+        var efficiency = 0
+        var performance = 0
+        return cpu.cores.enumerated().map { index, usage in
+            let kind = cpu.kind(ofCore: index)
+            let number: Int
+            if kind == .performance {
+                performance += 1
+                number = performance
+            } else {
+                efficiency += 1
+                number = efficiency
+            }
+            return CoreLoad(index: index, kind: kind, label: "\(kind.tag)\(number)", percent: usage.percent)
+        }
+    }
+
+    @ViewBuilder
+    private var coreChart: some View {
+        let loads = cores
+        if loads.isEmpty {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.3))
+                .overlay {
+                    Text("Sampling...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+        } else {
+            Chart(loads) { core in
+                BarMark(
+                    x: .value("Core", core.label),
+                    y: .value("Load", core.percent),
+                    width: .fixed(14)
+                )
+                .cornerRadius(3)
+                .foregroundStyle(by: .value("Kind", core.kind == .performance ? "Performance" : "Efficiency"))
+            }
+            .chartForegroundStyleScale([
+                "Efficiency": Color.accentColor.opacity(0.55),
+                "Performance": Color.accentColor,
+            ])
+            .chartYScale(domain: 0...100)
+            .chartYAxis {
+                // Two marks only: the bars are 66 pt tall and three labels
+                // would collide.
+                AxisMarks(position: .leading, values: [0, 100]) {
+                    AxisGridLine()
+                    AxisValueLabel().font(.caption2).foregroundStyle(Color.secondary)
+                }
+            }
+            .chartXAxis {
+                AxisMarks { AxisValueLabel().font(.caption2).foregroundStyle(Color.secondary) }
+            }
+            .chartLegend(position: .bottom, alignment: .leading, spacing: 4) {
+                HStack(spacing: Layout.gutter * 1.5) {
+                    LegendItem(label: "Efficiency", value: "", style: Color.accentColor.opacity(0.55))
+                    LegendItem(label: "Performance", value: "", style: Color.accentColor)
+                }
+            }
+        }
+    }
+}
+
+private struct CoreLoad: Identifiable {
+    let index: Int
+    let kind: CoreKind
+    let label: String
+    let percent: Double
+
+    var id: Int { index }
+}
+
+// MARK: - Memory
+
+private struct MemoryCard: View {
+    let snapshot: MetricsSnapshot
+    let history: MetricsHistory
+
+    var body: some View {
+        Card(title: "Memory", symbolName: "memorychip") {
+            if let memory = snapshot.memory {
+                HStack(alignment: .firstTextBaseline, spacing: Layout.gutter) {
+                    Text("\(Fmt.memorySize(memory.used)) of \(Fmt.memorySize(memory.total))")
+                        .font(.title3.weight(.medium))
+                        .monospacedDigit()
+                    Spacer(minLength: 0)
+                    Label(
+                        memory.pressure?.label.capitalized ?? "Unknown",
+                        systemImage: "circle.fill"
+                    )
+                    .font(.caption)
+                    .imageScale(.small)
+                    .foregroundStyle(MetricColor.pressure(memory.pressure))
+                }
+
+                SegmentedBar(
+                    segments: [
+                        .init(id: "app", value: Double(memory.app), style: Color.accentColor),
+                        .init(id: "wired", value: Double(memory.wired), style: Color.accentColor.opacity(0.65)),
+                        .init(id: "compressed", value: Double(memory.compressed), style: Color.accentColor.opacity(0.4)),
+                        .init(id: "cached", value: Double(memory.cachedFiles), style: Color.secondary.opacity(0.35)),
+                    ],
+                    total: Double(memory.total)
+                )
+
+                Grid(alignment: .leading, horizontalSpacing: Layout.gutter * 1.5, verticalSpacing: 6) {
+                    GridRow {
+                        LegendItem(label: "App", value: Fmt.memorySize(memory.app), style: Color.accentColor)
+                        LegendItem(label: "Wired", value: Fmt.memorySize(memory.wired), style: Color.accentColor.opacity(0.65))
+                    }
+                    GridRow {
+                        LegendItem(label: "Compressed", value: Fmt.memorySize(memory.compressed), style: Color.accentColor.opacity(0.4))
+                        LegendItem(label: "Cached files", value: Fmt.memorySize(memory.cachedFiles), style: Color.secondary.opacity(0.35))
+                    }
+                }
+
+                Divider()
+
+                StatRow(label: "Swap used", value: "\(Fmt.memorySize(memory.swap.used)) of \(Fmt.memorySize(memory.swap.total))")
+                StatRow(label: "Free", value: Fmt.memorySize(memory.free))
+
+                Spacer(minLength: 0)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recent history")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Sparkline(values: Array(history.memoryUsed), minimumRange: 5)
+                        .frame(height: 24)
+                }
+            } else {
+                CardPlaceholder()
+            }
+        }
+    }
+}
+
+// MARK: - Storage
+
+private struct StorageCard: View {
+    let snapshot: MetricsSnapshot
+    let history: MetricsHistory
+
+    var body: some View {
+        Card(title: "Storage", symbolName: "internaldrive") {
+            if let volume = snapshot.bootVolume {
+                Text("\(Fmt.storageSize(volume.used)) of \(Fmt.storageSize(volume.total)) used")
+                    .font(.title3.weight(.medium))
+                    .monospacedDigit()
+
+                SegmentedBar(
+                    segments: [
+                        .init(id: "used", value: Double(volume.used), style: usedStyle(volume.usedFraction))
+                    ],
+                    total: Double(volume.total)
+                )
+
+                HStack {
+                    Text(volume.name)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: Layout.gutter)
+                    Text("\(Fmt.storageSize(volume.available)) free")
+                        .monospacedDigit()
+                }
+                .font(.callout)
+
+                Divider()
+
+                HStack(alignment: .top, spacing: Layout.cardPadding) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        StatBlock(
+                            caption: "Read",
+                            value: Fmt.throughput(snapshot.diskIO?.bytesReadPerSecond ?? 0),
+                            size: .callout
+                        )
+                        Sparkline(values: Array(history.diskRead), minimumRange: 1_000_000)
+                            .frame(height: 20)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        StatBlock(
+                            caption: "Write",
+                            value: Fmt.throughput(snapshot.diskIO?.bytesWrittenPerSecond ?? 0),
+                            size: .callout
+                        )
+                        Sparkline(values: Array(history.diskWrite), tint: .accentColor.opacity(0.6), minimumRange: 1_000_000)
+                            .frame(height: 20)
+                    }
+                }
+            } else {
+                CardPlaceholder()
+            }
+        }
+    }
+
+    private func usedStyle(_ fraction: Double) -> Color {
+        fraction >= 0.9 ? MetricColor.usage(fraction) : .accentColor
+    }
+}
+
+// MARK: - Thermals
+
+private struct ThermalsCard: View {
+    let snapshot: MetricsSnapshot
+    let settings: AppSettings
+
+    var body: some View {
+        Card(title: "Thermals", symbolName: "thermometer.medium") {
+            if snapshot.temperatures.isEmpty && snapshot.fans.isEmpty {
+                CardPlaceholder()
+            } else {
+                Grid(alignment: .leading, horizontalSpacing: Layout.cardPadding, verticalSpacing: Layout.gutter * 1.5) {
+                    GridRow {
+                        temperatureBlock("CPU", reading: snapshot.hottestCPU)
+                            .gridColumnAlignment(.leading)
+                        temperatureBlock("GPU", reading: snapshot.hottest(in: .gpu))
+                            .gridColumnAlignment(.leading)
+                    }
+                    GridRow {
+                        temperatureBlock("SSD", reading: snapshot.hottest(in: .ssd))
+                        temperatureBlock("Battery", reading: snapshot.hottest(in: .battery))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Divider()
+
+                HStack(alignment: .top, spacing: Layout.cardPadding) {
+                    StatBlock(
+                        caption: "System power",
+                        value: snapshot.systemPower.map { Fmt.watts($0.watts) } ?? "--",
+                        size: .callout
+                    )
+                    Spacer(minLength: 0)
+                    ForEach(snapshot.fans, id: \.index) { fan in
+                        StatBlock(
+                            caption: "Fan \(fan.index + 1)",
+                            value: Fmt.rpm(fan.actual),
+                            size: .callout
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func temperatureBlock(_ caption: String, reading: TemperatureReading?) -> some View {
+        StatBlock(
+            caption: caption,
+            value: reading.map { Fmt.temperature($0.celsius, unit: settings.temperatureUnit) } ?? "--",
+            tint: reading.map { MetricColor.temperature($0.celsius) },
+            size: .title3
+        )
+    }
+}
+
+private struct CardPlaceholder: View {
+    var body: some View {
+        HStack {
+            Text("Sampling...")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(height: 64)
+    }
+}

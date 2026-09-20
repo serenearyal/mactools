@@ -64,6 +64,23 @@ public enum SensorNaming {
         powerTable[key] != nil
     }
 
+    /// The labelled temperature keys, in key order. A caller that must not pay
+    /// for the 0.8 s catalog enumeration reads these directly and drops the
+    /// ones the machine does not answer.
+    public static func knownTemperatureKeys(
+        in categories: Set<SensorCategory>? = nil
+    ) -> [SMCFourCC] {
+        temperatureTable
+            .filter { categories?.contains($0.value.category) ?? true }
+            .keys
+            .sorted { $0.stringValue < $1.stringValue }
+    }
+
+    /// The labelled power keys, in key order.
+    public static var knownPowerKeys: [SMCFourCC] {
+        powerTable.keys.sorted { $0.stringValue < $1.stringValue }
+    }
+
     private static let temperatureTable: [SMCFourCC: (label: String, category: SensorCategory)] = [
         // M1 generation performance cores.
         "Tp01": ("CPU performance core 1", .cpuPerformance),
