@@ -42,10 +42,6 @@ struct PlaceholderTabView: View {
         switch tab {
         case .windows:
             "Window layouts arrive with the window manager."
-        case .keepAwake:
-            "Keeping this Mac awake arrives with the power tools."
-        case .backlight:
-            "Keyboard backlight control arrives with the brightness slider."
         default:
             "This part of Vent is not built yet."
         }

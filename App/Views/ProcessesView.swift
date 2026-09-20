@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 struct ProcessesView: View {
     @Bindable var store: ProcessStore
     let helper: HelperController
+    let settings: AppSettings
+    let reports: ReportService
     let showSettings: () -> Void
 
     @State private var pending: SignalRequest?
@@ -54,6 +56,14 @@ struct ProcessesView: View {
 
             SearchField(text: $store.searchText, prompt: "Name, PID or path")
                 .frame(minWidth: 90, idealWidth: 190, maxWidth: 190)
+
+            CopyForAIMenu(
+                subject: .processes,
+                settings: settings,
+                hasSelection: !store.selection.isEmpty
+            ) { scope, format in
+                reports.copyProcesses(scope: scope, format: format)
+            }
 
             Button {
                 ask(.terminate)
@@ -152,6 +162,10 @@ struct ProcessesView: View {
             Button("Quit") { ask(.terminate, ids: ids) }
             Button("Force Quit", role: .destructive) { ask(.kill, ids: ids) }
             Divider()
+            Button("Copy for AI") {
+                store.selection = ids
+                reports.copyProcesses(scope: .selection)
+            }
             Button("Reveal in Finder") { reveal(rows) }
                 .disabled(rows.allSatisfy { $0.executablePath == nil })
             Button(ids.count == 1 ? "Copy PID" : "Copy PIDs") {

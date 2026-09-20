@@ -1,6 +1,7 @@
 import Foundation
 
 import HelperProtocol
+import ReportKit
 import ScanKit
 
 let usage = """
@@ -20,6 +21,9 @@ commands:
   procs        print the process table
   watch        stream CPU, memory, disk I/O, power and CPU temperature
   scan         run the largest-files scan
+  report       print the Copy for AI text for the processes or the largest files
+  awake        read the sleep assertions, or hold one until Ctrl-C
+  backlight    read the keyboard backlight (never writes it)
   helper-ping  check the privileged helper over XPC
   helper-read  read one SMC key through the privileged helper
   fan-status   print the fan state the helper sees
@@ -44,6 +48,17 @@ options:
   fan-set      <index> <rpm>    clamped to the limits of that fan
                --hold           keep the speed, print status every 2 s,
                                 restore Auto on Ctrl-C
+  report       processes|files  which table to print
+               --no-preamble    leave out the question for the chat model
+               --tsv            tab separated instead of a markdown table
+               --limit N        number of rows (60 processes, 100 files)
+  awake        status           list the assertions and SleepDisabled
+               hold <minutes>   hold the same assertion the app takes,
+                                0 for no timeout, Ctrl-C to release
+  backlight    get|ids|auto     read the built-in keyboard backlight
+
+'report files' reads the cache the app and 'ventctl scan' write; it never
+starts a scan of its own.
 """
 
 func fail(_ message: String) -> Never {
@@ -162,6 +177,57 @@ do {
             root: options.string("root") ?? Scan.dataVolumePath,
             top: try options.integer("top", default: 20, range: 1...Scan.resultLimit)
         )
+    case "report":
+        let positional = tail.filter { !$0.hasPrefix("--") }
+        guard positional.count == 1 else {
+            throw CLIError("'report' takes 'processes' or 'files'")
+        }
+        let subject = positional[0]
+        var rest = tail
+        rest.removeAll { $0 == subject }
+        let options = try Options(rest, allowed: ["limit"], flags: ["no-preamble", "tsv"])
+        let preamble = !options.flag("no-preamble")
+        let format: TableFormat = options.flag("tsv") ? .tsv : .markdown
+        switch subject {
+        case "processes":
+            try ReportCommands.processes(
+                includePreamble: preamble,
+                format: format,
+                limit: try options.integer("limit", default: 60, range: 1...10_000)
+            )
+        case "files":
+            try ReportCommands.files(
+                includePreamble: preamble,
+                format: format,
+                limit: try options.integer("limit", default: 100, range: 1...Scan.resultLimit)
+            )
+        default:
+            throw CLIError("'report' takes 'processes' or 'files', not '\(subject)'")
+        }
+    case "awake":
+        switch tail.first {
+        case "status", nil:
+            guard tail.count <= 1 else { throw CLIError("'awake status' takes no option") }
+            try AwakeCommands.status()
+        case "hold":
+            guard tail.count == 2, let minutes = Int(tail[1]), minutes >= 0 else {
+                throw CLIError("'awake hold' takes a whole number of minutes, 0 for no timeout")
+            }
+            try AwakeCommands.hold(minutes: minutes)
+        case .some(let name):
+            throw CLIError("'awake' takes 'status' or 'hold <minutes>', not '\(name)'")
+        }
+    case "backlight":
+        switch tail.first {
+        case "get", nil:
+            try BacklightCommands.get()
+        case "ids":
+            try BacklightCommands.ids()
+        case "auto":
+            try BacklightCommands.auto()
+        case .some(let name):
+            throw CLIError("'backlight' takes 'get', 'ids' or 'auto', not '\(name)'")
+        }
     case "fan-status":
         try withoutOptions()
         try FanCommands.status()

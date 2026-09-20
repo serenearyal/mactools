@@ -24,10 +24,18 @@ struct MenuBarPopoverView: View {
     var actions = MenuBarPopoverActions()
     /// The capture path renders one section without touching the app state.
     var forcedSection: PopoverSection?
-    /// The header slot a later batch fills ("Awake 42m"). Empty today.
-    var badge: PopoverBadge?
+    /// A badge a capture run wants in the header, whatever the app is doing.
+    var forcedBadge: PopoverBadge?
 
     private var section: PopoverSection { forcedSection ?? services.popoverSection }
+
+    /// "Awake 42m" while Keep Awake holds an assertion, "Awake" when it runs
+    /// indefinitely, and nothing at all otherwise.
+    private var badge: PopoverBadge? {
+        if let forcedBadge { return forcedBadge }
+        guard let text = services.keepAwake.badgeText else { return nil }
+        return PopoverBadge(text: text, symbolName: "circle.fill")
+    }
 
     var body: some View {
         VStack(spacing: 0) {

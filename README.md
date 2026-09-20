@@ -91,7 +91,8 @@ A second left click, a click anywhere else or Escape closes the popover again.
 | Thermals & Fans | Hottest CPU sensor, GPU, system power, and each fan with its mode and speed | Fans |
 | Top Processes | The three heaviest by CPU and by memory | Processes |
 
-The header has **Open Vent**, **Settings** and **Quit**; the footer has **Lock Keyboard** and **Scan Storage...**.
+The header has **Open Vent**, **Settings** and **Quit**, and a badge slot that shows **Awake 42m** while Keep Awake holds an assertion.
+The **Tools** section holds one row each for Keep Awake, Keyboard Backlight, Fans, Keyboard Lock, Copy for AI and Scan Storage, in that order; the rows share the fixed height of the panel between them, so a Mac with no keyboard backlight gets five slightly taller rows rather than a hole.
 **Auto** and **Full Blast** set every fan at once, and are disabled with one line of explanation while the helper is not installed.
 Every button that leads somewhere closes the popover first.
 
@@ -285,6 +286,43 @@ Things worth knowing about the scan:
 - **Size on disk.** Rows rank by allocated size, `st_blocks * 512`, not by logical size. The "Logical" column is filled only when the two differ by more than a percent, which is how a sparse file, an APFS clone or a compressed file gives itself away.
 - **Trash only.** "Move to Trash" is the only thing Vent does to a file, and it asks first. There is no delete: everything it moves can be put back from the Trash. A row whose file is gone since the scan is dimmed rather than removed, so the ranking does not jump under the pointer.
 
+## Copy for AI
+
+Everything the Processes and Storage tables know, as a markdown table with a header that stands on its own, ready to paste into a chat.
+
+The paste opens with a question for the chat model, then one line about this Mac (model, chip, clusters, RAM, macOS, uptime, battery), one line of live totals, and one line that says how many rows of how many the table holds and what "CPU %" means on a ten-core machine.
+Without those lines a model has no idea whether 180 % CPU is a runaway process or a normal build.
+
+- **Where.** The "Copy for AI" menu in the Processes and Storage toolbars, "Copy for AI" in either table's context menu, Command-Shift-C on either tab, the `doc.on.clipboard` button in the popover's Top Processes header, the "Copy for AI" row of the popover's Tools section, and "Copy Processes for AI" in the status item's right-click menu.
+- **Which rows.** "Copy All" takes the union of the top 40 by CPU and the top 40 by memory, capped at 60, so the 8 GB app sitting at 0 % is in the paste next to the one burning a core. "Copy Selected" takes exactly what is selected, in the order the table had it. Files: the top 100 by size on disk, with the folder each one is in.
+- **The two options.** "Include question for the AI" is on by default and is remembered; "Copy as TSV" swaps the markdown table for a tab separated one, for a spreadsheet.
+- **A copy with nothing on screen.** The process table only samples while somebody is looking at it, and a CPU percentage needs two passes about a second apart. A copy from the popover or the status item menu takes that pair first and shows a spinner while it does; the memory and disk totals are read in the same moment.
+- **Names cannot break the table.** A file called `a|b`, or one with a tab or a newline in its name, is escaped. `~` stands in for this account's home directory and for nothing else.
+
+The same text is on stdout with `ventctl report processes` and `ventctl report files`.
+
+## Keep Awake
+
+Holds this Mac awake with an `IOPMAssertionCreateWithProperties` assertion, `PreventUserIdleSystemSleep`, plus `PreventUserIdleDisplaySleep` beside it when "Keep the display on" is on.
+
+- **Durations:** indefinitely, 30 minutes, 1 hour, 2 hours, 4 hours. The duration is handed to the kernel as the assertion's own timeout with `TimeoutActionRelease`, so it ends even if Vent dies first, and the switch on screen moves itself at the same second through one timer with a tolerance. Nothing polls.
+- **Battery guard.** Default on: the assertion is released below 20 % on battery, and the charge has to clear the threshold by three points before it comes back. The threshold is a stepper from 5 % to 50 %. A critical thermal state releases it whatever the setting says. Only what the guard released may the guard give back - a Keep Awake the user switched off stays off when the Mac is plugged in.
+- **The state is never restored.** Vent starts every launch with Keep Awake off, and there is no "turn on at launch" option. A Mac that silently never sleeps because of a setting made weeks ago is a flat battery waiting to happen.
+- **Where.** The Keep Awake tab, the "Keep Awake" row of the popover's Tools section, and an "Awake 42m" badge in the popover header. While it is on, the status item's glyph is the filled variant of the same symbol, which is exactly as wide, so the menu bar item does not change size.
+- **What it does not do.** It stops the idle sleep that follows a spell of no input. It does not stop a sleep you ask for: the Apple menu, the power button and a closed lid on battery all still sleep this Mac.
+- **What else is holding this Mac awake.** The tab lists every assertion on the machine from `IOPMCopyAssertionsByProcess`, with the process, the pid and the type in plain words. It refreshes every five seconds and only while the tab is on screen.
+- **`pmset disablesleep`.** When the system-wide `SleepDisabled` setting is 1, the tab says so and offers `sudo pmset disablesleep 0` as selectable text with a copy button. Vent never sets it and cannot undo it: that needs root.
+
+## Keyboard backlight
+
+A slider and an Auto toggle for the built-in keyboard's backlight, through the private `CoreBrightness.framework`.
+
+- **How it is reached.** `dlopen` on the first use, `NSClassFromString("KeyboardBrightnessClient")`, and typed `@convention(c)` pointers from `method_getImplementation`. The type encodings are read off the class at runtime, not guessed. No entitlement is needed: it is an Apple platform binary, so library validation under the hardened runtime allows it, and `codesign -d --entitlements -` on the Release app shows no exception.
+- **When the Mac has no such keyboard.** The popover row, the sidebar item and the tab are not drawn at all. A row that is only ever disabled is worse than no row. `--backlight-force-unavailable` makes a Mac that does have one look like one that does not.
+- **The ladder.** The slider snaps to the same 16 steps F5 and F6 walk when it is released, so the next key press moves one rung instead of undoing a fraction. Writes during a drag are debounced to about ten a second, last value wins.
+- **Auto brightness.** Vent changes it only on an explicit click, in the popover chip or the tab's switch. While Auto is on the slider still works, and a line says the ambient sensor may move it again.
+- **The cost.** The value is read at 1 Hz, and only while the Backlight tab or the popover's Tools section is on screen. It goes through the same `SamplingDemand` as the metric samplers, so it stops with the view.
+
 ## Launch at login
 
 **Settings > Startup > Launch at login** registers the app with `SMAppService.mainApp`.
@@ -381,7 +419,19 @@ ventctl io                      # disk throughput
 ventctl scan ~/Downloads        # the walker on one folder
 ventctl helper-ping
 ventctl helper-read F0Ac
+ventctl report processes        # the Copy for AI text, on stdout
+ventctl report files --tsv      # the largest files from the cache, tab separated
+ventctl report processes --no-preamble --limit 20
+ventctl awake status            # every sleep assertion, and SleepDisabled
+ventctl awake hold 30           # the same assertion the app takes, until Ctrl-C
+ventctl backlight get           # level, auto, suppressed, dimmed
+ventctl backlight ids           # every keyboard, and which are built in
+ventctl backlight auto
 ```
+
+`report files` reads the cache the app and `ventctl scan` write; it never starts a scan of its own.
+`backlight` is read only by design: a command that dims the keyboard of somebody looking at another window is not a debugging tool.
+`awake hold` names its assertion "ventctl Keep Awake" rather than "Vent Keep Awake", so `pmset -g assertions` tells the CLI and the app apart.
 
 ### Debug launch arguments
 
@@ -398,6 +448,10 @@ open -a Vent --args --show-window --tab sensors
   --scan-root <path>           fill the Storage table from one folder
   --overlay-preview <seconds>  draw the lock overlay and create no event tap at all
   --lock-test <seconds>        a real lock, clamped to 10 s
+  --copy-report processes|files  run the Copy for AI menu item; overwrites the clipboard
+  --keep-awake-test <seconds>  a real assertion with a 1 minute timeout, released after n
+  --backlight-probe            log ids, built in, auto and level from the private framework
+  --backlight-force-unavailable  draw the app as if this Mac had no keyboard backlight
   --fake-fans                  a real governor over fans that do not exist
   --fan-mode 0=constant:3000   what a fake fan should do; also curve:Tp01:45:85 and auto
   --window-size 760x480        exact content size, for a shot at the minimum the layout allows
@@ -412,6 +466,7 @@ Launch it with `open -g -n /Applications/Vent.app --args --no-activate ...`: `sc
 The one thing it cannot photograph that way is the real popover: `NSPopover` does not appear for an inactive app, so a run without activation gets the `ImageRenderer` copy instead.
 It also renders the popover with `ImageRenderer` into `popover-<appearance>.png`, which needs no Screen Recording grant at all.
 That render is the only way to see the popover in the other appearance: the real one is built against the menu bar and follows the system, whatever `--appearance` says.
+It is not the way to check the Tools section: a `Menu`, a switch and a `Slider` are AppKit-backed views, and `ImageRenderer` draws a yellow placeholder for each of them, so that section has to be photographed from the real popover window by number.
 The same file counts the samples of the three stores, so a popover that left a timer running is one `grep` away.
 
 ### Logging

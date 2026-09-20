@@ -123,6 +123,13 @@ final class ProcessStore {
 
     var helperIsAnswering: Bool { helperRowCount > 0 }
 
+    /// True when the table holds rows a report can print.
+    ///
+    /// Two passes, not one: the first pass has no CPU baseline to subtract, so
+    /// its whole CPU column is nil and a report made from it would say nothing
+    /// about load at all.
+    var hasReportableSample: Bool { sampleCount >= 2 && !rows.isEmpty }
+
     // MARK: - Cadence
 
     func setDemand(_ demand: SamplingDemand) {
@@ -177,7 +184,28 @@ final class ProcessStore {
         selection = selection.filter { live.contains($0) }
     }
 
+    /// One sample pair for a copy from the popover or the status item menu.
+    ///
+    /// Those two surfaces can be the first thing the user opens, and the table
+    /// only samples while somebody is looking at it, so a report taken there
+    /// would have an empty CPU column. Two passes a second apart is the
+    /// shortest honest answer; the sleep carries a tolerance so the wakeup can
+    /// ride with one the system already has.
+    func sampleForReport() async {
+        guard !hasReportableSample else { return }
+        apply(await feed.sample())
+        try? await Task.sleep(for: .seconds(1), tolerance: .milliseconds(200))
+        apply(await feed.sample())
+    }
+
     // MARK: - Actions
+
+    /// The status line of the tab, for an action that did not come from here:
+    /// a Copy for AI from the toolbar says so in the same place a Force Quit
+    /// does, instead of inventing a second line for it.
+    func showMessage(_ text: String) {
+        message = text
+    }
 
     /// Quit or Force Quit. The processes of this user go through `kill(2)`
     /// here; the rest need the helper, which is the only thing on the machine

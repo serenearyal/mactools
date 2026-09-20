@@ -16,6 +16,7 @@ final class StatusItemController: NSObject {
     private var lastCells: [MenuBarCell] = []
     private var lastStyle: MenuBarLabelStyle?
     private var lastIcon: Bool?
+    private var lastAwake: Bool?
     private var lastScale: CGFloat = 0
     private var screenObserver: NSObjectProtocol?
 
@@ -47,6 +48,8 @@ final class StatusItemController: NSObject {
         menu.addItem(item(title: "Fans: Full Blast", action: #selector(fansFullBlast)))
         menu.addItem(item(title: "Fans: Auto", action: #selector(fansAuto)))
         menu.addItem(item(title: "Lock Keyboard", action: #selector(lockKeyboard)))
+        menu.addItem(.separator())
+        menu.addItem(item(title: "Copy Processes for AI", action: #selector(copyProcessesForAI)))
         menu.addItem(.separator())
         menu.addItem(item(title: "Settings...", action: #selector(openSettings)))
         menu.addItem(.separator())
@@ -100,12 +103,13 @@ final class StatusItemController: NSObject {
             (
                 MenuBarLabel.cells(snapshot: store.snapshot, settings: settings),
                 settings.labelStyle,
-                settings.showMenuBarIcon
+                settings.showMenuBarIcon,
+                AppServices.shared.keepAwake.isOn
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in self?.track() }
         }
-        render(cells: state.0, style: state.1, icon: state.2, force: false)
+        render(cells: state.0, style: state.1, icon: state.2, awake: state.3, force: false)
     }
 
     private func refresh(force: Bool) {
@@ -113,28 +117,38 @@ final class StatusItemController: NSObject {
             cells: MenuBarLabel.cells(snapshot: store.snapshot, settings: settings),
             style: settings.labelStyle,
             icon: settings.showMenuBarIcon,
+            awake: AppServices.shared.keepAwake.isOn,
             force: force
         )
     }
 
     /// The expensive part is `ImageRenderer`, so it only runs when a string,
-    /// the style, the icon setting or the screen scale changed.
-    private func render(cells: [MenuBarCell], style: MenuBarLabelStyle, icon: Bool, force: Bool) {
+    /// the style, the icon setting, the Keep Awake state or the screen scale
+    /// changed.
+    private func render(
+        cells: [MenuBarCell],
+        style: MenuBarLabelStyle,
+        icon: Bool,
+        awake: Bool,
+        force: Bool
+    ) {
         let scale = statusItem.button?.window?.backingScaleFactor
             ?? NSScreen.main?.backingScaleFactor
             ?? 2
         let unchanged = cells == lastCells
             && style == lastStyle
             && icon == lastIcon
+            && awake == lastAwake
             && scale == lastScale
         guard force || !unchanged else { return }
         lastCells = cells
         lastStyle = style
         lastIcon = icon
+        lastAwake = awake
         lastScale = scale
 
         let renderer = ImageRenderer(
-            content: MenuBarLabelView(cells: cells, style: style, showIcon: icon)
+            content: MenuBarLabelView(cells: cells, style: style, showIcon: icon, awake: awake)
         )
         renderer.scale = scale
         guard let image = renderer.nsImage else { return }
@@ -218,6 +232,13 @@ final class StatusItemController: NSObject {
 
     @objc private func lockKeyboard() {
         AppServices.shared.keyboardLock.lock()
+    }
+
+    /// Straight from the menu bar, with nothing on screen: the table is not
+    /// sampling, so the copy takes its own sample pair first and the paste is
+    /// about a second behind the click.
+    @objc private func copyProcessesForAI() {
+        AppServices.shared.reports.copyProcesses(samplesFirst: true)
     }
 
     @objc private func openSettings() {

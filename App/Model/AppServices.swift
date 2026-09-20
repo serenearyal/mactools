@@ -16,6 +16,10 @@ final class AppServices {
     let helper: HelperController
     let fans: FanStore
     let keyboardLock: KeyboardLockController
+    /// R2, R3 and R4: Copy for AI, the sleep assertion and the keyboard light.
+    let reports: ReportService
+    let keepAwake: KeepAwakeController
+    let backlight = KeyboardBacklightController()
     /// The first-run checklist and the login item behind it.
     let setup: SetupChecklist
     let windowController = MainWindowController()
@@ -103,6 +107,7 @@ final class AppServices {
         store.setDemand(demand)
         processes.setDemand(demand)
         fans.setDemand(demand)
+        backlight.setDemand(demand)
     }
 
     private init() {
@@ -123,5 +128,26 @@ final class AppServices {
         let helper = HelperController()
         self.helper = helper
         setup = SetupChecklist(settings: settings, helper: helper, lock: keyboardLock)
+        keepAwake = KeepAwakeController(settings: settings)
+        reports = ReportService(
+            settings: settings,
+            processes: processes,
+            storage: storage,
+            store: store
+        )
+    }
+
+    /// The sidebar, minus what this Mac cannot do.
+    ///
+    /// Only the backlight can vanish today: on a Mac whose keyboard does not
+    /// light up, the row, the sidebar item and the tab are not drawn at all
+    /// rather than drawn dead.
+    var sidebarSections: [(section: MainTabSection, tabs: [MainTab])] {
+        MainTabSection.allCases.compactMap { section in
+            let tabs = section.tabs.filter { tab in
+                tab != .backlight || backlight.isAvailable
+            }
+            return tabs.isEmpty ? nil : (section, tabs)
+        }
     }
 }

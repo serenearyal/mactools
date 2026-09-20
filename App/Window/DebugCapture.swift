@@ -75,6 +75,25 @@ enum DebugCapture {
                 dark: suffix == "dark",
                 to: base.appending(path: "menubar-icononly-\(suffix).png")
             )
+            // The Keep Awake glyph beside the ordinary one, so the two can be
+            // compared at 1x and 2x without holding the Mac awake for it.
+            for scale in [CGFloat(1), CGFloat(2)] {
+                captureLabel(
+                    cells: cells,
+                    style: .twoLine,
+                    dark: suffix == "dark",
+                    awake: true,
+                    scale: scale,
+                    to: base.appending(path: "menubar-awake-\(Int(scale))x-\(suffix).png")
+                )
+                captureLabel(
+                    cells: cells,
+                    style: .twoLine,
+                    dark: suffix == "dark",
+                    scale: scale,
+                    to: base.appending(path: "menubar-asleep-\(Int(scale))x-\(suffix).png")
+                )
+            }
             if quit { NSApp.terminate(nil) }
         }
     }
@@ -200,8 +219,13 @@ enum DebugCapture {
         let iconOnlyWidth = ImageRenderer(
             content: MenuBarLabelView(cells: [], style: .twoLine)
         ).nsImage?.size.width ?? 0
+        // The Keep Awake glyph must not change the width of the status item.
+        let awakeWidth = ImageRenderer(
+            content: MenuBarLabelView(cells: cells, style: services.settings.labelStyle, awake: true)
+        ).nsImage?.size.width ?? 0
         let lines = labelWidths + [
             "label icon only: \(String(format: "%.1f", iconOnlyWidth)) pt",
+            "label awake: \(String(format: "%.1f", awakeWidth)) pt",
             "menu bar content: \(services.settings.menuBarContent.rawValue)",
             "setup checklist visible: \(services.setup.isVisible)",
             "setup steps open: \(services.setup.remaining)",
@@ -227,6 +251,15 @@ enum DebugCapture {
             "popover section request: \(SamplingPlan.popoverRequest(section: services.popoverSection).summary)",
             "samples processes: \(SamplingPlan.samplesProcesses(services.demand))",
             "polls fans: \(SamplingPlan.pollsFans(services.demand))",
+            // R2, R3 and R4, in one block.
+            "keep awake: \(services.keepAwake.debugSummary)",
+            "keep awake badge: \(services.keepAwake.badgeText ?? "none")",
+            "keep awake reason: \(services.keepAwake.reason ?? "none")",
+            "keep awake assertions: \(services.keepAwake.assertions.count)",
+            "sleep disabled: \(services.keepAwake.sleepDisabled.map(String.init) ?? "unread")",
+            "backlight: \(services.backlight.debugSummary)",
+            "backlight available: \(services.backlight.isAvailable)",
+            "report can files: \(services.reports.canReportFiles)",
             "window number: \(window?.windowNumber ?? 0)",
             "app active: \(NSApp.isActive)",
             "activation policy: \(NSApp.activationPolicy().rawValue)",
@@ -308,10 +341,14 @@ enum DebugCapture {
         cells: [MenuBarCell],
         style: MenuBarLabelStyle,
         dark: Bool,
+        awake: Bool = false,
+        scale: CGFloat = 2,
         to url: URL
     ) {
-        let renderer = ImageRenderer(content: MenuBarLabelView(cells: cells, style: style))
-        renderer.scale = 2
+        let renderer = ImageRenderer(
+            content: MenuBarLabelView(cells: cells, style: style, awake: awake)
+        )
+        renderer.scale = scale
         guard let image = renderer.nsImage else { return }
         image.isTemplate = true
 
@@ -331,8 +368,8 @@ enum DebugCapture {
         )
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
-            pixelsWide: Int(size.width * 2),
-            pixelsHigh: Int(size.height * 2),
+            pixelsWide: Int(size.width * scale),
+            pixelsHigh: Int(size.height * scale),
             bitsPerSample: 8,
             samplesPerPixel: 4,
             hasAlpha: true,

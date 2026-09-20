@@ -63,6 +63,9 @@ targets:
           - SysMetrics
           - ScanKit
           - HelperProtocol
+          - ReportKit
+          - AwakeKit
+          - BacklightKit
       - target: VentHelper
         embed: true
         link: false
@@ -102,6 +105,18 @@ targets:
       - ventctl
       # The XPC client is the app's, so the CLI proves the same code path.
       - App/Helper/HelperConnection.swift
+      - App/Model/AppLog.swift
+      # The same mapping, the same sysctl reader and the same two system
+      # clients the app uses, so `ventctl report`, `ventctl awake` and
+      # `ventctl backlight` prove the app's own paths rather than a copy.
+      - App/Model/ReportBuilder.swift
+      - App/Model/SystemContextParser.swift
+      - App/Model/SystemContextReader.swift
+      - App/Power/PowerSource.swift
+      - App/Power/PowerAssertion.swift
+      - App/Backlight/BacklightClient.swift
+      - App/Backlight/BacklightEngine.swift
+      - App/Backlight/KeyboardBacklightClient.swift
     settings:
       base:
         PRODUCT_NAME: ventctl
@@ -114,6 +129,9 @@ targets:
           - SysMetrics
           - ScanKit
           - HelperProtocol
+          - ReportKit
+          - AwakeKit
+          - BacklightKit
 
   VentIntegrationTests:
     type: bundle.unit-test
@@ -152,6 +170,18 @@ targets:
       # it removes. A struct over values, in its own file away from the
       # `@Observable` store, for the same linker reason as `AppSettings`.
       - App/Model/MetricsHistory.swift
+      # R2, R3 and R4. All four are plain files for the same linker reason as
+      # `AppSettings`: the mapping, the sysctl parsing, the Keep Awake state
+      # machine and the backlight rules carry no `@Observable` and no SwiftUI,
+      # so the tests share the app's copy instead of a rewrite. The
+      # `@Observable` shells around them stay out of this bundle.
+      - App/Model/ReportBuilder.swift
+      - App/Model/SystemContextParser.swift
+      - App/Model/SystemContextReader.swift
+      - App/Power/KeepAwakeMachine.swift
+      - App/Power/PowerSource.swift
+      - App/Backlight/BacklightClient.swift
+      - App/Backlight/BacklightEngine.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.integration-tests
@@ -164,6 +194,9 @@ targets:
           - SysMetrics
           - ScanKit
           - HelperProtocol
+          - ReportKit
+          - AwakeKit
+          - BacklightKit
 
 schemes:
   Vent:

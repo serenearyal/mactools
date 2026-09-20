@@ -171,11 +171,19 @@ struct MenuBarLabelView: View {
     let cells: [MenuBarCell]
     let style: MenuBarLabelStyle
     var showIcon: Bool = true
+    /// Keep Awake is holding an assertion.
+    ///
+    /// The filled variant of the same symbol, not a second glyph and not a
+    /// badge: `fan` and `fan.fill` have the same advance width, so the item
+    /// does not change size, and at 10 pt in the menu bar a solid shape next
+    /// to a hollow one is the only difference that reads at all. A dot or a
+    /// cup badge turns to mud at 1x.
+    var awake: Bool = false
 
     var body: some View {
         HStack(spacing: MenuBarMetrics.iconSpacing) {
             if showIcon || cells.isEmpty {
-                Image(systemName: "fan")
+                Image(systemName: awake ? "fan.fill" : "fan")
                     .font(.system(
                         size: cells.isEmpty ? MenuBarMetrics.soloIconSize : MenuBarMetrics.iconSize,
                         weight: .medium

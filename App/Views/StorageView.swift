@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 struct StorageView: View {
     let store: MetricsStore
     @Bindable var storage: StorageStore
+    let settings: AppSettings
+    let reports: ReportService
 
     @State private var confirmingTrash = false
     @State private var breakdownScope = BreakdownScope.home
@@ -87,6 +89,15 @@ struct StorageView: View {
 
             SearchField(text: $storage.searchText)
                 .frame(minWidth: 120, idealWidth: 190, maxWidth: 190)
+
+            CopyForAIMenu(
+                subject: .files,
+                settings: settings,
+                hasSelection: !storage.selection.isEmpty
+            ) { scope, format in
+                reports.copyFiles(scope: scope, format: format)
+            }
+            .disabled(storage.result == nil)
 
             Button {
                 storage.revealInFinder(storage.selection)
@@ -182,6 +193,10 @@ struct StorageView: View {
             .tableStyle(.inset)
             .contextMenu(forSelectionType: StorageRow.ID.self) { ids in
                 Button("Reveal in Finder") { storage.revealInFinder(ids) }
+                Button("Copy for AI") {
+                    storage.selection = ids
+                    reports.copyFiles(scope: .selection)
+                }
                 Divider()
                 Button("Move to Trash", role: .destructive) {
                     storage.selection = ids

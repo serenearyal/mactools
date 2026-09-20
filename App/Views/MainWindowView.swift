@@ -5,10 +5,13 @@ struct MainWindowView: View {
 
     var body: some View {
         NavigationSplitView {
+            // Not `MainTabSection.allCases` directly: on a Mac whose keyboard
+            // has no backlight that item is not drawn at all, and a section
+            // left with no items is not drawn either.
             List(selection: selection) {
-                ForEach(MainTabSection.allCases) { section in
-                    Section(section.title) {
-                        ForEach(section.tabs) { tab in
+                ForEach(services.sidebarSections, id: \.section) { group in
+                    Section(group.section.title) {
+                        ForEach(group.tabs) { tab in
                             Label(tab.title, systemImage: tab.symbolName)
                                 .tag(tab)
                         }
@@ -76,12 +79,23 @@ struct TabDetailView: View {
             ProcessesView(
                 store: services.processes,
                 helper: services.helper,
+                settings: services.settings,
+                reports: services.reports,
                 showSettings: { services.selectedTab = .settings }
             )
         case .storage:
-            StorageView(store: services.store, storage: services.storage)
-        // R7, R3 and R4 fill these three. They sample nothing until they do.
-        case .windows, .keepAwake, .backlight:
+            StorageView(
+                store: services.store,
+                storage: services.storage,
+                settings: services.settings,
+                reports: services.reports
+            )
+        case .keepAwake:
+            KeepAwakeView(keepAwake: services.keepAwake)
+        case .backlight:
+            BacklightView(backlight: services.backlight)
+        // R7 fills this one. It samples nothing until it does.
+        case .windows:
             PlaceholderTabView(tab: tab)
         case .keyboardLock:
             KeyboardLockView(settings: services.settings, lock: services.keyboardLock)

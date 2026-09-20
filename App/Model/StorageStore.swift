@@ -270,6 +270,13 @@ final class StorageStore {
         }
     }
 
+    /// The status line of the tab, for an action that did not come from here.
+    /// A Copy for AI from the toolbar lands in the same place "Scanned 2 h ago"
+    /// does, and is cleared by the same dismiss button.
+    func showMessage(_ text: String) {
+        message = text
+    }
+
     /// The dismiss button of the status line, and the selection change and the
     /// scan that make the message stale. Without it "Moved 3 items to the
     /// Trash" hid "Scanned 2 h ago" for the rest of the session.

@@ -35,6 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // One pass at launch, so a fan mode the user chose last time is back
         // before the window is even opened. The helper deliberately forgot it.
         Task { await services.fans.refresh() }
+        // Keep Awake starts off every launch by design; this only subscribes
+        // it to the battery pushes its guard needs.
+        services.keepAwake.start()
         let controller = StatusItemController(
             settings: services.settings,
             store: services.store,
@@ -97,19 +100,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Last chance to give the keyboard, the fans and the disk back.
+    /// Last chance to give the keyboard, the sleep, the fans and the disk back.
     ///
     /// The order is the order of the damage. A locked keyboard that outlives
     /// the app would leave the user unable to type, so it goes first and
-    /// synchronously. A running scan holds a thread that walks the volume, so
-    /// it is told to stop before anything blocks. The fans go last, with a
-    /// bounded wait: the helper restores Auto by itself when this connection
-    /// dies, so this is a courtesy that makes it immediate, never a promise
-    /// the quit path depends on.
+    /// synchronously. The sleep assertion goes next: it costs nothing and a
+    /// Mac that will not sleep is the most annoying thing to leave behind. A
+    /// running scan holds a thread that walks the volume, so it is told to
+    /// stop before anything blocks. The fans go last, with a bounded wait: the
+    /// helper restores Auto by itself when this connection dies, so this is a
+    /// courtesy that makes it immediate, never a promise the quit path depends
+    /// on.
     func applicationWillTerminate(_ notification: Notification) {
         let services = AppServices.shared
-        AppLog.app.notice("terminating: keyboard released, scan cancelled, fans back to Auto")
+        AppLog.app.notice(
+            "terminating: keyboard released, keep awake released, scan cancelled, fans back to Auto"
+        )
         services.keyboardLock.releaseForTermination()
+        services.keepAwake.releaseForTermination()
         services.storage.cancelScan()
         services.fans.restoreAllAutoOnTermination()
     }
@@ -244,6 +252,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            index + 1 < arguments.count,
            let seconds = Int(arguments[index + 1]) {
             services.keyboardLock.lock(seconds: LockTimeout.clampDebug(seconds))
+        }
+        // R2, R3 and R4 debug arguments, grouped so a merge sees one block.
+        //
+        // `--copy-report processes|files` runs the menu item itself, which is
+        // the only way to check the clipboard path end to end. It overwrites
+        // the pasteboard, so it is never on by default.
+        if let index = arguments.firstIndex(of: "--copy-report"), index + 1 < arguments.count {
+            let subject = arguments[index + 1].lowercased()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if subject == "files" {
+                    services.reports.copyFiles(announce: false)
+                } else {
+                    services.reports.copyProcesses(samplesFirst: true, announce: false)
+                }
+            }
+        }
+        // `--keep-awake-test <seconds>`: a real assertion with a one minute
+        // timeout, released after that many seconds. Nothing is persisted.
+        if let index = arguments.firstIndex(of: "--keep-awake-test"),
+           index + 1 < arguments.count,
+           let seconds = Int(arguments[index + 1]) {
+            services.keepAwake.debugTest(seconds: min(max(seconds, 1), 120))
+        }
+        // `--backlight-probe` writes one log line with everything the
+        // hardened Release build managed to read out of CoreBrightness.
+        if arguments.contains("--backlight-probe") {
+            services.backlight.probe()
         }
         DebugFanBackend.applyLaunchArguments(arguments, to: services.fans)
         DebugCapture.run(arguments: arguments, services: services)

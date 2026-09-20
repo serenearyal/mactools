@@ -1,3 +1,4 @@
+import AwakeKit
 import FanControl
 import Foundation
 import Observation
@@ -108,6 +109,16 @@ struct SettingsData: Codable, Equatable, Sendable {
     /// True once the "Vent keeps running here" tip has been shown. It appears
     /// the first time the window is closed and never again.
     var menuBarTipShown: Bool = false
+    /// Copy for AI: whether the paste opens with the paragraph that tells the
+    /// chat what to do with the table. On by default - the table alone is the
+    /// unusual case, and it is one click away.
+    var reportIncludesQuestion: Bool = true
+    /// Keep Awake. The state itself is deliberately not here: Vent never comes
+    /// back holding this Mac awake after a relaunch.
+    var keepAwakeDuration: KeepAwakeDuration = .indefinite
+    var keepAwakeDisplay: Bool = false
+    var keepAwakeBatteryGuard: Bool = true
+    var keepAwakeBatteryThreshold: Int = 20
 
     init() {}
 
@@ -145,6 +156,18 @@ struct SettingsData: Codable, Equatable, Sendable {
             ?? fallback.showDockIcon
         menuBarTipShown = try container.decodeIfPresent(Bool.self, forKey: .menuBarTipShown)
             ?? fallback.menuBarTipShown
+        reportIncludesQuestion = try container.decodeIfPresent(Bool.self, forKey: .reportIncludesQuestion)
+            ?? fallback.reportIncludesQuestion
+        keepAwakeDuration = try container.decodeIfPresent(KeepAwakeDuration.self, forKey: .keepAwakeDuration)
+            ?? fallback.keepAwakeDuration
+        keepAwakeDisplay = try container.decodeIfPresent(Bool.self, forKey: .keepAwakeDisplay)
+            ?? fallback.keepAwakeDisplay
+        keepAwakeBatteryGuard = try container.decodeIfPresent(Bool.self, forKey: .keepAwakeBatteryGuard)
+            ?? fallback.keepAwakeBatteryGuard
+        keepAwakeBatteryThreshold = (
+            try container.decodeIfPresent(Int.self, forKey: .keepAwakeBatteryThreshold)
+                ?? fallback.keepAwakeBatteryThreshold
+        ).clamped(to: KeepAwakeOptions.thresholdRange)
     }
 }
 
@@ -204,6 +227,34 @@ final class AppSettings {
     var menuBarTipShown: Bool {
         get { data.menuBarTipShown }
         set { data.menuBarTipShown = newValue; persist() }
+    }
+
+    var reportIncludesQuestion: Bool {
+        get { data.reportIncludesQuestion }
+        set { data.reportIncludesQuestion = newValue; persist() }
+    }
+
+    /// The four Keep Awake settings as the one value the controller works in.
+    /// The threshold is clamped on the way out as well as in: a file written by
+    /// hand must not put the stepper out of its own range.
+    var keepAwakeOptions: KeepAwakeOptions {
+        get {
+            KeepAwakeOptions(
+                duration: data.keepAwakeDuration,
+                keepDisplayOn: data.keepAwakeDisplay,
+                batteryGuardEnabled: data.keepAwakeBatteryGuard,
+                batteryThreshold: data.keepAwakeBatteryThreshold
+                    .clamped(to: KeepAwakeOptions.thresholdRange)
+            )
+        }
+        set {
+            data.keepAwakeDuration = newValue.duration
+            data.keepAwakeDisplay = newValue.keepDisplayOn
+            data.keepAwakeBatteryGuard = newValue.batteryGuardEnabled
+            data.keepAwakeBatteryThreshold = newValue.batteryThreshold
+                .clamped(to: KeepAwakeOptions.thresholdRange)
+            persist()
+        }
     }
 
     var refreshInterval: RefreshInterval {

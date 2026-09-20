@@ -35,7 +35,7 @@ struct PopoverDashboard: View {
                 )
             }
             Divider()
-            section { ProcessSection(processes: services.processes, open: open) }
+            section { ProcessSection(processes: services.processes, reports: services.reports, open: open) }
         }
     }
 
@@ -412,6 +412,7 @@ struct FanRow {
 
 private struct ProcessSection: View {
     let processes: ProcessStore
+    let reports: ReportService
     let open: (MainTab) -> Void
 
     var body: some View {
@@ -424,6 +425,16 @@ private struct ProcessSection: View {
                     open: open
                 )
                 Spacer(minLength: PopoverLayout.rowSpacing)
+                // The confirmation sits in the row rather than under it, and
+                // only where "Show All" already leaves room, so a copy changes
+                // no height at all.
+                if let confirmation = reports.confirmation {
+                    Text(confirmation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .transition(.opacity)
+                }
+                copyButton
                 // Not `.link`: that style draws as an empty box under
                 // `ImageRenderer`, which is how the capture path sees this.
                 Button { open(.processes) } label: {
@@ -434,12 +445,36 @@ private struct ProcessSection: View {
                 }
                 .buttonStyle(.plain)
             }
+            .animation(.easeInOut(duration: 0.2), value: reports.confirmation)
 
             HStack(alignment: .top, spacing: PopoverLayout.padding) {
                 column(caption: "CPU", rows: cpuRows)
                 column(caption: "MEMORY", rows: memoryRows)
             }
         }
+    }
+
+    /// The spinner keeps the same 18 pt box as the symbol: a copy taken with
+    /// nothing sampled yet needs a second, and the header must not twitch.
+    private var copyButton: some View {
+        Button {
+            reports.copyProcesses(samplesFirst: true)
+        } label: {
+            Group {
+                if reports.isPreparing {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: "doc.on.clipboard")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 18, height: 18)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(reports.isPreparing)
+        .help("Copy processes for AI")
     }
 
     private func column(caption: String, rows: [ProcessLine]) -> some View {
