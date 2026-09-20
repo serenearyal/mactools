@@ -29,7 +29,11 @@ final class StatusItemController: NSObject {
     private lazy var contextMenu: NSMenu = {
         let menu = NSMenu()
         menu.addItem(item(title: "Open Vent", action: #selector(openWindow)))
+        menu.addItem(.separator())
+        menu.addItem(item(title: "Fans: Full Blast", action: #selector(fansFullBlast)))
+        menu.addItem(item(title: "Fans: Auto", action: #selector(fansAuto)))
         menu.addItem(item(title: "Lock Keyboard", action: #selector(lockKeyboard)))
+        menu.addItem(.separator())
         menu.addItem(item(title: "Settings...", action: #selector(openSettings)))
         menu.addItem(.separator())
         menu.addItem(item(title: "Quit Vent", action: #selector(quit), key: "q"))
@@ -138,6 +142,14 @@ final class StatusItemController: NSObject {
 
     /// Straight from the menu bar: the point of the lock is to start it with
     /// the mouse alone, with the keyboard already under a cloth.
+    @objc private func fansFullBlast() {
+        Task { await AppServices.shared.fans.setAllFullBlast() }
+    }
+
+    @objc private func fansAuto() {
+        Task { await AppServices.shared.fans.restoreAllAuto() }
+    }
+
     @objc private func lockKeyboard() {
         AppServices.shared.keyboardLock.lock()
     }

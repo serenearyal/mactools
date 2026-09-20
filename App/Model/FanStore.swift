@@ -138,6 +138,15 @@ final class FanStore {
         await refresh()
     }
 
+    /// Every fan at its maximum, as a constant setpoint.
+    func setAllFullBlast() async {
+        // The menu bar can ask before the Fans tab ever polled.
+        if snapshot == nil { await refresh() }
+        for fan in fans {
+            await setMode(.constant(rpm: Int(fan.maximumRPM.rounded())), forFan: fan.index)
+        }
+    }
+
     func restoreAllAuto() async {
         for index in fans.map(\.index) {
             store(.auto, forFan: index)

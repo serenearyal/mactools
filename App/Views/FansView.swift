@@ -136,6 +136,11 @@ struct FansContent: View {
                 if fans.isBusy {
                     ProgressView().controlSize(.small)
                 }
+                Button("Full blast", systemImage: "wind") {
+                    Task { await fans.setAllFullBlast() }
+                }
+                .disabled(fans.fans.isEmpty || fans.isBusy)
+                .help("Runs every fan at its maximum speed")
                 Button("All fans to Auto") {
                     Task { await fans.restoreAllAuto() }
                 }
@@ -390,6 +395,9 @@ private struct ConstantEditor: View {
             .frame(width: 72)
             Stepper("Speed", value: binding, in: fan.minimumRPM...fan.maximumRPM, step: ConstantEditor.step)
                 .labelsHidden()
+            Button("Max") { binding.wrappedValue = fan.maximumRPM }
+                .disabled(rpm >= Int(fan.maximumRPM.rounded()))
+                .help("Full blast for this fan")
         }
     }
 

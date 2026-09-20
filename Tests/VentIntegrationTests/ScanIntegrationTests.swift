@@ -1,4 +1,5 @@
 import Darwin
+import AppKit
 import Foundation
 import XCTest
 
@@ -179,5 +180,14 @@ final class ScanIntegrationTests: XCTestCase {
         let volume = ScanCache.volumeIdentifier(for: Scan.dataVolumePath)
         try cache.save(result, volume: volume)
         XCTAssertEqual(try cache.load(volume: volume), result)
+    }
+}
+
+final class SettingsLinkTests: XCTestCase {
+    /// A misspelled scheme has no handler, and macOS then offers the App Store.
+    func testFullDiskAccessLinkHasAHandler() throws {
+        let url = try XCTUnwrap(URL(string: FullDiskAccess.settingsURLString))
+        XCTAssertEqual(url.scheme, "x-apple.systempreferences")
+        XCTAssertNotNil(NSWorkspace.shared.urlForApplication(toOpen: url))
     }
 }

@@ -11,7 +11,7 @@ import Foundation
 public enum FullDiskAccess {
     /// Opens System Settings straight on the Full Disk Access list.
     public static let settingsURLString =
-        "x-apple-systempreferences:com.apple.preference.security?Privacy_AllFiles"
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
 
     public static var userDatabasePath: String {
         NSHomeDirectory() + "/Library/Application Support/com.apple.TCC/TCC.db"
