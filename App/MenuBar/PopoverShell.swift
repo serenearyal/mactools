@@ -7,6 +7,9 @@ struct MenuBarPopoverActions {
     var openTab: (MainTab) -> Void = { _ in }
     var selectSection: (PopoverSection) -> Void = { _ in }
     var lockKeyboard: () -> Void = {}
+    /// Close the popover and leave the front to whoever had it. The Windows
+    /// tiles use it: the window they move is behind the popover.
+    var closePopover: () -> Void = {}
     var startAuto: () -> Void = {}
     var startFullBlast: () -> Void = {}
     var quit: () -> Void = {}
@@ -59,7 +62,7 @@ struct MenuBarPopoverView: View {
         case .dashboard:
             PopoverDashboard(services: services, actions: actions, open: open)
         case .windows:
-            PopoverWindows()
+            PopoverWindows(services: services, actions: actions, open: open)
         case .tools:
             PopoverTools(services: services, actions: actions, open: open)
         }

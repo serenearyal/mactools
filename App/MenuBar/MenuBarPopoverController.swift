@@ -68,6 +68,11 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
     func show(from button: NSStatusBarButton, sticky: Bool = false) {
         guard !isShown else { return }
         popover.behavior = sticky ? .applicationDefined : .transient
+        // Before anything else, and above all before `NSApp.activate()`: the
+        // Windows section acts on the window the user was working in, and from
+        // the moment Vent is frontmost there is no other focused window left
+        // to find.
+        services.windows.captureTarget()
 
         let host = NSHostingController(rootView: content)
         host.sizingOptions = [.preferredContentSize]
@@ -114,6 +119,11 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
                     // under it and its sampling would outlive the click.
                     self?.close()
                     services.keyboardLock.lock()
+                },
+                // A tile click moves a window that is behind this panel, so
+                // the panel goes first and the app it belongs to comes back.
+                closePopover: { [weak self] in
+                    self?.close()
                 },
                 startAuto: {
                     Task { await services.fans.restoreAllAuto() }

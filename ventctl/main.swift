@@ -20,6 +20,7 @@ commands:
   procs        print the process table
   watch        stream CPU, memory, disk I/O, power and CPU temperature
   scan         run the largest-files scan
+  window list  print the windows of the frontmost app, read-only
   helper-ping  check the privileged helper over XPC
   helper-read  read one SMC key through the privileged helper
   fan-status   print the fan state the helper sees
@@ -162,6 +163,11 @@ do {
             root: options.string("root") ?? Scan.dataVolumePath,
             top: try options.integer("top", default: 20, range: 1...Scan.resultLimit)
         )
+    case "window":
+        guard tail == ["list"] else {
+            throw CLIError("'window' takes one subcommand: 'ventctl window list'")
+        }
+        try WindowCommands.list()
     case "fan-status":
         try withoutOptions()
         try FanCommands.status()

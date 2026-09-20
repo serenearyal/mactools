@@ -35,6 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // One pass at launch, so a fan mode the user chose last time is back
         // before the window is even opened. The helper deliberately forgot it.
         Task { await services.fans.refresh() }
+        // Claims the chords of the chosen set. Off by default, so this is one
+        // conflict scan and nothing else until the user picks a set.
+        services.windows.start()
         let controller = StatusItemController(
             settings: services.settings,
             store: services.store,
@@ -110,6 +113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let services = AppServices.shared
         AppLog.app.notice("terminating: keyboard released, scan cancelled, fans back to Auto")
         services.keyboardLock.releaseForTermination()
+        // Every chord goes back to the system, so the next app that asks for
+        // it gets it instead of `eventHotKeyExistsErr`.
+        services.windows.stop()
         services.storage.cancelScan()
         services.fans.restoreAllAutoOnTermination()
     }
@@ -244,6 +250,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            index + 1 < arguments.count,
            let seconds = Int(arguments[index + 1]) {
             services.keyboardLock.lock(seconds: LockTimeout.clampDebug(seconds))
+        }
+        // `--shortcut-set off|rectangle|alternate`: claim one set for this run
+        // and write nothing back. It is how a run proves which chords another
+        // app already owns, without pressing a key.
+        if let index = arguments.firstIndex(of: "--shortcut-set"), index + 1 < arguments.count,
+           let choice = WindowShortcutChoice(argument: arguments[index + 1]) {
+            services.windows.overrideChoice(choice)
+        }
+        // `--window-selftest <probe.app>`: move a window of our own probe app
+        // through every action and check the result against `WindowKit`. It
+        // touches no other window, and it quits when the table is written.
+        if let index = arguments.firstIndex(of: "--window-selftest"), index + 1 < arguments.count {
+            let output = arguments.firstIndex(of: "--window-selftest-out")
+                .flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
+            WindowSelfTest.run(
+                probePath: arguments[index + 1],
+                outputDirectory: output,
+                services: services
+            )
         }
         DebugFanBackend.applyLaunchArguments(arguments, to: services.fans)
         DebugCapture.run(arguments: arguments, services: services)

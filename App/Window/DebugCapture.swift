@@ -29,6 +29,9 @@ enum DebugCapture {
         let base = URL(filePath: directory, directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         writeLockStatus(services: services, to: base.appending(path: "lock-\(suffix).txt"))
+        // The window manager, before anything else can take the front: which
+        // window it would move, and what the system said about every chord.
+        writeWindowStatus(services: services, to: base.appending(path: "windows-\(suffix).txt"))
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             let tab = services.selectedTab.rawValue
@@ -41,6 +44,9 @@ enum DebugCapture {
                 dark: suffix == "dark",
                 to: base.appending(path: "detail-\(tab)-\(suffix).png")
             )
+            // The Windows section draws the window that was in front, and the
+            // render is not the popover opening, so nothing captures it for us.
+            services.windows.captureTarget()
             // All three sections in one run: the popover is pure SwiftUI, so
             // it costs one `ImageRenderer` pass each and saves two launches.
             for section in PopoverSection.allCases {
@@ -132,6 +138,12 @@ enum DebugCapture {
                     OverviewCards(store: services.store, settings: services.settings, twoColumns: true)
                 }
                 .padding(Layout.cardSpacing)
+            } else if services.selectedTab == .windows {
+                WindowsContent(
+                    controller: services.windows,
+                    settings: services.settings,
+                    scrolls: false
+                )
             } else if services.selectedTab == .fans {
                 FansContent(
                     store: services.store,
@@ -300,6 +312,41 @@ enum DebugCapture {
             "overlay windows: \(numbers.isEmpty ? "none" : numbers)",
             "screens: \(NSScreen.screens.count)",
         ]
+        try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// What the window manager sees: the window it would move, the displays,
+    /// the other managers that are running and the result of every chord.
+    ///
+    /// The chord list is the point. A registration cannot be checked by
+    /// pressing keys on somebody's machine, and `RegisterEventHotKey` reports
+    /// "taken" for a chord another app owns, so this file is the proof.
+    private static func writeWindowStatus(services: AppServices, to url: URL) {
+        let windows = services.windows
+        windows.captureTarget()
+        let target = windows.target
+        let conflicts = windows.conflicts
+            .map { "\($0.label) pid \($0.pid)" }
+            .joined(separator: " | ")
+        var lines = [
+            "AXIsProcessTrusted: \(windows.accessibilityGranted)",
+            "window id lookup: \(AX.hasWindowIDLookup)",
+            "target: \(target?.label ?? "none")",
+            "target pid: \(target?.pid ?? 0)",
+            "target frame: \(target.map { "\($0.frame)" } ?? "none")",
+            "target subrole: \(target?.subrole ?? "none")",
+            "target settable: position \(target?.isPositionSettable ?? false), size \(target?.isSizeSettable ?? false)",
+            "target refusal: \(target?.refusal?.rawValue ?? "none")",
+            "target display: \(target?.displayName ?? "none")",
+            "status: \(windows.status ?? "none")",
+            "screens: \(ScreenList.count)",
+            "gap: \(Int(windows.gap)) pt",
+            "eui workaround: \(services.settings.windows.enhancedUserInterfaceWorkaround)",
+            "reactivates after tile: \(services.settings.windows.reactivatesAfterTile)",
+            "window managers running: \(conflicts.isEmpty ? "none" : conflicts)",
+            "conflict banner: \(windows.showsConflictBanner)",
+        ]
+        lines.append(contentsOf: windows.registrationReport)
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
     }
 

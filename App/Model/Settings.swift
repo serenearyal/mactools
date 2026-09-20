@@ -1,6 +1,8 @@
+import CoreGraphics
 import FanControl
 import Foundation
 import Observation
+import WindowKit
 
 enum MenuBarLabelStyle: String, CaseIterable, Codable, Identifiable, Sendable {
     case twoLine
@@ -108,6 +110,9 @@ struct SettingsData: Codable, Equatable, Sendable {
     /// True once the "Vent keeps running here" tip has been shown. It appears
     /// the first time the window is closed and never again.
     var menuBarTipShown: Bool = false
+    /// The window manager: the shortcut set, the gap and its two switches.
+    /// One nested value, so the settings file gains one key.
+    var windows = WindowSettingsData()
 
     init() {}
 
@@ -145,6 +150,8 @@ struct SettingsData: Codable, Equatable, Sendable {
             ?? fallback.showDockIcon
         menuBarTipShown = try container.decodeIfPresent(Bool.self, forKey: .menuBarTipShown)
             ?? fallback.menuBarTipShown
+        windows = try container.decodeIfPresent(WindowSettingsData.self, forKey: .windows)
+            ?? fallback.windows
     }
 }
 
@@ -204,6 +211,19 @@ final class AppSettings {
     var menuBarTipShown: Bool {
         get { data.menuBarTipShown }
         set { data.menuBarTipShown = newValue; persist() }
+    }
+
+    /// The window manager's own settings. One accessor for the whole value:
+    /// `settings.windows.gap = 12` reads it, changes it and writes it back.
+    var windows: WindowSettingsData {
+        get { data.windows }
+        set {
+            var clamped = newValue
+            clamped.gap = Double(WindowLayout.clampGap(CGFloat(newValue.gap)))
+            guard data.windows != clamped else { return }
+            data.windows = clamped
+            persist()
+        }
     }
 
     var refreshInterval: RefreshInterval {

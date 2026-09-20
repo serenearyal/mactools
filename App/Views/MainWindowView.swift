@@ -80,8 +80,10 @@ struct TabDetailView: View {
             )
         case .storage:
             StorageView(store: services.store, storage: services.storage)
-        // R7, R3 and R4 fill these three. They sample nothing until they do.
-        case .windows, .keepAwake, .backlight:
+        case .windows:
+            WindowsView(controller: services.windows, settings: services.settings)
+        // R3 and R4 fill these two. They sample nothing until they do.
+        case .keepAwake, .backlight:
             PlaceholderTabView(tab: tab)
         case .keyboardLock:
             KeyboardLockView(settings: services.settings, lock: services.keyboardLock)

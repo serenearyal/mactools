@@ -40,8 +40,6 @@ struct PlaceholderTabView: View {
     /// One sentence each, in the words of the thing that is coming.
     static func note(for tab: MainTab) -> String {
         switch tab {
-        case .windows:
-            "Window layouts arrive with the window manager."
         case .keepAwake:
             "Keeping this Mac awake arrives with the power tools."
         case .backlight:
