@@ -105,3 +105,11 @@ Your actions that I cannot do: admin password / Login Items approval for the hel
 - On a MacBook with a notch and a full menu bar, macOS hides the status item. Start Vent again to open the window, or use the icon-only mode.
 - Without Full Disk Access, a home-folder scan can stop at a macOS consent prompt.
 - The app is not notarized, because there is no Developer ID certificate.
+
+## Review update (2026-09-20, after the bug sweep)
+
+- The helper v0.1.0+2 is installed through the legacy installer and answers as root.
+- `ventctl selftest-fans` passes on the real hardware: fan 0 reached 2421 RPM within 20 s and went back to Auto.
+- The user confirmed that Full Blast works from the popover.
+- Root cause of the dead fans: the SMC shows a written mode or target about 50 ms late (measured with `sudo ventctl fan-probe`), and the helper read it back at once and treated the write as refused.
+- Still open for the user: `kill -9` restore, sleep and wake, reboot, the live keyboard lock, a Full Disk Access scan, launch at login, drag-to-reorder in Settings.
