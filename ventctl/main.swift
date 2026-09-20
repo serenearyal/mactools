@@ -19,13 +19,15 @@ commands:
   procs        print the process table
   watch        stream CPU, memory, disk I/O, power and CPU temperature
   scan         run the largest-files scan
-  helper-ping  check the privileged helper
+  helper-ping  check the privileged helper over XPC
+  helper-read  read one SMC key through the privileged helper
   selftest     run the fan safety sequence
 
 options:
-  procs  --sort cpu|mem   order of the table (default cpu)
-         --top N          number of rows (default 15)
-  watch  --interval S     seconds between lines (default 1)
+  procs        --sort cpu|mem   order of the table (default cpu)
+               --top N          number of rows (default 15)
+  watch        --interval S     seconds between lines (default 1)
+  helper-read  <KEY>            four-character SMC key, for example F0Ac
 """
 
 func fail(_ message: String) -> Never {
@@ -120,7 +122,15 @@ do {
     case "watch":
         let options = try Options(tail, allowed: ["interval"])
         try MetricsCommands.watch(interval: try options.double("interval", default: 1, range: 0.1...60))
-    case "scan", "helper-ping", "selftest":
+    case "helper-ping":
+        try withoutOptions()
+        try HelperCommands.ping()
+    case "helper-read":
+        guard tail.count == 1 else {
+            throw CLIError("'helper-read' takes one SMC key, for example 'ventctl helper-read F0Ac'")
+        }
+        try HelperCommands.read(key: tail[0])
+    case "scan", "selftest":
         try withoutOptions()
         fail("'\(command)' is not implemented yet")
     case "-h", "--help", "help":

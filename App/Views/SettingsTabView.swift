@@ -4,9 +4,12 @@ import SwiftUI
 struct SettingsTabView: View {
     @Bindable var settings: AppSettings
     let store: MetricsStore
+    let helper: HelperController
 
     var body: some View {
         Form {
+            HelperSectionView(helper: helper)
+
             Section {
                 metricList
                 if !settings.availableMenuBarMetrics.isEmpty {

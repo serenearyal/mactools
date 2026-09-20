@@ -11,6 +11,7 @@ final class AppServices {
 
     let settings: AppSettings
     let store: MetricsStore
+    let helper = HelperController()
     let windowController = MainWindowController()
     /// Set by the app delegate once the status item exists.
     @ObservationIgnored var statusItemController: StatusItemController?

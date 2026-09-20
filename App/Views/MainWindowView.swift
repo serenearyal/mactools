@@ -63,7 +63,11 @@ struct TabDetailView: View {
                 description: "Locking the keyboard for cleaning arrives in a later batch."
             )
         case .settings:
-            SettingsTabView(settings: services.settings, store: services.store)
+            SettingsTabView(
+                settings: services.settings,
+                store: services.store,
+                helper: services.helper
+            )
         }
     }
 }

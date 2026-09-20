@@ -100,6 +100,8 @@ targets:
       - CommandLineTool
     sources:
       - ventctl
+      # The XPC client is the app's, so the CLI proves the same code path.
+      - App/Helper/HelperConnection.swift
     settings:
       base:
         PRODUCT_NAME: ventctl
@@ -118,6 +120,14 @@ targets:
     platform: macOS
     sources:
       - Tests/VentIntegrationTests
+      # The helper service, without its main.swift, so the XPC round trip can
+      # be tested over an anonymous listener with no daemon installed.
+      - Helper/HelperService.swift
+      - Helper/ClientAuth.swift
+      # The installer builds a shell script and an AppleScript by hand; the
+      # tests lint and compile what it builds.
+      - App/Helper/HelperInstalling.swift
+      - App/Helper/LegacyHelperInstaller.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.integration-tests
