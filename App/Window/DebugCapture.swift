@@ -23,10 +23,14 @@ enum DebugCapture {
         let quit = arguments.contains("--capture-quit")
         let suffix = value(of: "--appearance", in: arguments) ?? "light"
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            let base = URL(filePath: directory, directoryHint: .isDirectory)
-            try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        // The lock file is written at once, not after the delay: an overlay
+        // preview lasts seconds, and the capturing script needs the window
+        // numbers while the windows are still on screen.
+        let base = URL(filePath: directory, directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        writeLockStatus(services: services, to: base.appending(path: "lock-\(suffix).txt"))
 
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             let tab = services.selectedTab.rawValue
             capture(
                 window: services.windowController.attachedWindow,
@@ -149,6 +153,26 @@ enum DebugCapture {
             "memory sample: \(snapshot.memory != nil)",
             "disk io sample: \(snapshot.diskIO != nil)",
             "history cpu points: \(services.store.history.cpuTotal.count)",
+        ]
+        try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// What the keyboard lock sees of the system: the two permissions as this
+    /// bundle holds them, secure input, and the overlay windows a screenshot
+    /// can name.
+    private static func writeLockStatus(services: AppServices, to url: URL) {
+        let lock = services.keyboardLock
+        let permissions = lock.refreshPermissions()
+        let numbers = lock.overlayWindowNumbers.map(String.init).joined(separator: " ")
+        let lines = [
+            "bundle path: \(Bundle.main.bundlePath)",
+            "AXIsProcessTrusted: \(permissions.accessibility)",
+            "CGPreflightListenEventAccess: \(permissions.inputMonitoring)",
+            "IsSecureEventInputEnabled: \(permissions.secureInputEnabled)",
+            "lock state: \(lock.state)",
+            "lock timeout setting: \(services.settings.lockTimeoutSeconds) s",
+            "overlay windows: \(numbers.isEmpty ? "none" : numbers)",
+            "screens: \(NSScreen.screens.count)",
         ]
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
     }

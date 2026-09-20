@@ -133,6 +133,8 @@ struct SettingsData: Codable, Equatable, Sendable {
     /// keys are case sensitive: "Tg05" is the first GPU die.
     var sensorKey: String = "Tg05"
     var showUnlabelledSensors: Bool = false
+    /// The hard timeout of the keyboard lock, in seconds.
+    var lockTimeoutSeconds: Int = LockTimeout.default
 
     init() {}
 
@@ -154,6 +156,10 @@ struct SettingsData: Codable, Equatable, Sendable {
         sensorKey = try container.decodeIfPresent(String.self, forKey: .sensorKey) ?? fallback.sensorKey
         showUnlabelledSensors = try container.decodeIfPresent(Bool.self, forKey: .showUnlabelledSensors)
             ?? fallback.showUnlabelledSensors
+        lockTimeoutSeconds = LockTimeout.clamp(
+            try container.decodeIfPresent(Int.self, forKey: .lockTimeoutSeconds)
+                ?? fallback.lockTimeoutSeconds
+        )
     }
 }
 
@@ -208,6 +214,13 @@ final class AppSettings {
     var showUnlabelledSensors: Bool {
         get { data.showUnlabelledSensors }
         set { data.showUnlabelledSensors = newValue; persist() }
+    }
+
+    /// Clamped on the way in: a stored value out of range would hold the
+    /// keyboard for longer than the UI ever offers.
+    var lockTimeoutSeconds: Int {
+        get { LockTimeout.clamp(data.lockTimeoutSeconds) }
+        set { data.lockTimeoutSeconds = LockTimeout.clamp(newValue); persist() }
     }
 
     /// The metrics that are off, in the fixed order of the enum.

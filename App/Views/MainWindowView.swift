@@ -55,10 +55,7 @@ struct TabDetailView: View {
         case .storage:
             StorageView(store: services.store, storage: services.storage)
         case .keyboardLock:
-            PlaceholderTabView(
-                tab: .keyboardLock,
-                description: "Locking the keyboard for cleaning arrives in a later batch."
-            )
+            KeyboardLockView(settings: services.settings, lock: services.keyboardLock)
         case .settings:
             SettingsTabView(
                 settings: services.settings,

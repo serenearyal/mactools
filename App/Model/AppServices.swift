@@ -13,6 +13,7 @@ final class AppServices {
     let store: MetricsStore
     let storage = StorageStore()
     let helper = HelperController()
+    let keyboardLock: KeyboardLockController
     let windowController = MainWindowController()
     /// Set by the app delegate once the status item exists.
     @ObservationIgnored var statusItemController: StatusItemController?
@@ -33,6 +34,7 @@ final class AppServices {
         let settings = AppSettings()
         self.settings = settings
         store = MetricsStore(settings: settings)
+        keyboardLock = KeyboardLockController(settings: settings)
         windowController.store = store
     }
 }

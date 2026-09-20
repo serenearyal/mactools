@@ -128,6 +128,9 @@ targets:
       # tests lint and compile what it builds.
       - App/Helper/HelperInstalling.swift
       - App/Helper/LegacyHelperInstaller.swift
+      # The rules that decide when the keyboard comes back. Pure Swift with
+      # no AppKit, so the tests share the app's copy instead of a rewrite.
+      - App/KeyboardLock/KeyboardLockPolicy.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.integration-tests

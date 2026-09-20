@@ -23,6 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyLaunchArguments(services: services)
     }
 
+    /// Last chance to give the keyboard back. A locked keyboard that outlives
+    /// the app would need a reboot.
+    func applicationWillTerminate(_ notification: Notification) {
+        AppServices.shared.keyboardLock.releaseForTermination()
+    }
+
     /// Closing the window leaves the status item running.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
@@ -53,6 +59,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // screenshot run does not need a click or a whole-disk scan.
         if let index = arguments.firstIndex(of: "--scan-root"), index + 1 < arguments.count {
             services.storage.startScan(root: arguments[index + 1])
+        }
+        // `--overlay-preview <seconds>` draws the lock overlay and creates no
+        // event tap at all, so a screenshot run can never hold the keyboard.
+        if let index = arguments.firstIndex(of: "--overlay-preview"),
+           index + 1 < arguments.count,
+           let seconds = Int(arguments[index + 1]) {
+            services.keyboardLock.previewOverlay(seconds: min(max(seconds, 1), 30))
+        }
+        // `--lock-test <seconds>` is the only way to engage a real lock from
+        // the command line, and it is clamped to 10 s so an automated run can
+        // never trap the user behind a locked keyboard.
+        if let index = arguments.firstIndex(of: "--lock-test"),
+           index + 1 < arguments.count,
+           let seconds = Int(arguments[index + 1]) {
+            services.keyboardLock.lock(seconds: LockTimeout.clampDebug(seconds))
         }
         DebugCapture.run(arguments: arguments, services: services)
     }
