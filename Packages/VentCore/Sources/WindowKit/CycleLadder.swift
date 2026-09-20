@@ -50,6 +50,23 @@ public struct CycleLadder: Sendable, Equatable {
         state = nil
     }
 
+    /// The window did not take the frame it was given, so the ladder remembers
+    /// where it really landed.
+    ///
+    /// A window with a minimum size refuses the narrow rungs; without this the
+    /// next press would see a window that is not where the ladder put it, call
+    /// that "the user moved it" and start the ladder over on every press.
+    public mutating func rememberApplied(frame: CGRect) {
+        guard let state, Geometry.isFinite(frame) else { return }
+        self.state = CycleState(
+            action: state.action,
+            slot: state.slot,
+            frame: frame,
+            screenID: state.screenID,
+            time: state.time
+        )
+    }
+
     /// The frame for this press, and the new state. `current` is where the
     /// window is now; a nil current cannot be a repeat.
     public mutating func resolve(
