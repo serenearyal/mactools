@@ -1,6 +1,7 @@
 import Foundation
 
 import HelperProtocol
+import ScanKit
 
 let usage = """
 ventctl - debug CLI for Vent (protocol \(HelperConstants.protocolVersion))
@@ -27,6 +28,8 @@ options:
   procs        --sort cpu|mem   order of the table (default cpu)
                --top N          number of rows (default 15)
   watch        --interval S     seconds between lines (default 1)
+  scan         --root PATH      where to start (default \(Scan.dataVolumePath))
+               --top N          number of rows (default 20)
   helper-read  <KEY>            four-character SMC key, for example F0Ac
 """
 
@@ -130,7 +133,13 @@ do {
             throw CLIError("'helper-read' takes one SMC key, for example 'ventctl helper-read F0Ac'")
         }
         try HelperCommands.read(key: tail[0])
-    case "scan", "selftest":
+    case "scan":
+        let options = try Options(tail, allowed: ["root", "top"])
+        try ScanCommands.scan(
+            root: options.string("root") ?? Scan.dataVolumePath,
+            top: try options.integer("top", default: 20, range: 1...Scan.resultLimit)
+        )
+    case "selftest":
         try withoutOptions()
         fail("'\(command)' is not implemented yet")
     case "-h", "--help", "help":

@@ -53,10 +53,7 @@ struct TabDetailView: View {
                 description: "The sortable process table with CPU and memory arrives in a later batch."
             )
         case .storage:
-            PlaceholderTabView(
-                tab: .storage,
-                description: "Volume details and the largest-files scan arrive in a later batch."
-            )
+            StorageView(store: services.store, storage: services.storage)
         case .keyboardLock:
             PlaceholderTabView(
                 tab: .keyboardLock,

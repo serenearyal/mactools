@@ -11,6 +11,7 @@ final class AppServices {
 
     let settings: AppSettings
     let store: MetricsStore
+    let storage = StorageStore()
     let helper = HelperController()
     let windowController = MainWindowController()
     /// Set by the app delegate once the status item exists.

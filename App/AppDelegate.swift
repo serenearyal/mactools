@@ -49,6 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if arguments.contains("--show-window") {
             services.windowController.show()
         }
+        // `--scan-root <path>` fills the Storage table at launch, so a
+        // screenshot run does not need a click or a whole-disk scan.
+        if let index = arguments.firstIndex(of: "--scan-root"), index + 1 < arguments.count {
+            services.storage.startScan(root: arguments[index + 1])
+        }
         DebugCapture.run(arguments: arguments, services: services)
     }
 }
