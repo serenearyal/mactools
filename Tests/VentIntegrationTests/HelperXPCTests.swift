@@ -290,49 +290,72 @@ final class HelperSleepXPCTests: XCTestCase {
     private var listener: NSXPCListener!
     private var delegate: HelperListenerDelegate!
     private var connection: NSXPCConnection!
+    private var extras: [NSXPCConnection] = []
+    private var service: HelperService!
     private var power: InMemorySleepSwitch!
     private var marker: InMemorySleepDisabledMarker!
 
     private func start(flag: Bool = false, marked: Bool = false) {
         power = InMemorySleepSwitch(disabled: flag)
         marker = InMemorySleepDisabledMarker(marked: marked)
-        let service = HelperService(
-            fanHardware: InMemoryFanHardware.macBookPro(),
-            sleep: SleepDisabledGovernor(power: power, marker: marker),
-            requiresRoot: false
+        startListener(
+            for: HelperService(
+                fanHardware: InMemoryFanHardware.macBookPro(),
+                sleep: SleepDisabledGovernor(power: power, marker: marker),
+                requiresRoot: false
+            )
         )
+    }
+
+    private func startListener(for service: HelperService) {
+        self.service = service
         delegate = HelperListenerDelegate(service: service)
         listener = NSXPCListener.anonymous()
         listener.delegate = delegate
         listener.resume()
+        connection = connect()
+    }
 
-        connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
-        connection.remoteObjectInterface = NSXPCInterface(with: VentHelperProtocol.self)
-        connection.resume()
+    /// Another client of the same helper: the app and `ventctl` at once, which
+    /// is the case the per-connection hold exists for.
+    private func connect() -> NSXPCConnection {
+        let fresh = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        fresh.remoteObjectInterface = NSXPCInterface(with: VentHelperProtocol.self)
+        fresh.resume()
+        return fresh
+    }
+
+    private func connectExtra() -> NSXPCConnection {
+        let fresh = connect()
+        extras.append(fresh)
+        return fresh
     }
 
     override func tearDown() {
+        for extra in extras { extra.invalidate() }
+        extras = []
         connection?.invalidate()
         listener?.invalidate()
         connection = nil
         listener = nil
         delegate = nil
+        service = nil
         power = nil
         marker = nil
         super.tearDown()
     }
 
-    private func proxy() throws -> any VentHelperProtocol {
-        let raw = connection.remoteObjectProxyWithErrorHandler { error in
+    private func proxy(on link: NSXPCConnection? = nil) throws -> any VentHelperProtocol {
+        let raw = (link ?? connection).remoteObjectProxyWithErrorHandler { error in
             XCTFail("XPC connection error: \(error)")
         }
         return try XCTUnwrap(raw as? any VentHelperProtocol)
     }
 
-    private func report() throws -> SleepDisabledReport {
+    private func report(on link: NSXPCConnection? = nil) throws -> SleepDisabledReport {
         let answered = expectation(description: "sleep state")
         let inbox = Inbox<ReadReply>()
-        try proxy().sleepDisabledState { data, error in
+        try proxy(on: link).sleepDisabledState { data, error in
             inbox.put(ReadReply(data: data, error: error))
             answered.fulfill()
         }
@@ -343,15 +366,43 @@ final class HelperSleepXPCTests: XCTestCase {
     }
 
     @discardableResult
-    private func set(_ disabled: Bool) throws -> String? {
+    private func set(_ disabled: Bool, on link: NSXPCConnection? = nil) throws -> String? {
         let answered = expectation(description: "set sleep")
         let inbox = Inbox<String?>()
-        try proxy().setSleepDisabled(disabled) {
+        try proxy(on: link).setSleepDisabled(disabled) {
             inbox.put($0)
             answered.fulfill()
         }
         wait(for: [answered], timeout: 5)
         return inbox.value ?? nil
+    }
+
+    /// Waits for the flag to come off on its own, which is what a connection
+    /// going away does. Polling, because the invalidation handler runs on an
+    /// XPC queue of its own.
+    private func waitForTheFlagToClear() {
+        let cleared = expectation(description: "the flag came off")
+        let poll = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [power] timer in
+            guard let power, !power.value else { return }
+            timer.invalidate()
+            cleared.fulfill()
+        }
+        wait(for: [cleared], timeout: 5)
+        poll.invalidate()
+    }
+
+    /// Waits until the helper has noticed that a connection is gone, so a test
+    /// that asserts the flag did *not* move is asserting it after the handler
+    /// that could have moved it has run.
+    private func waitForConnections(_ count: Int) {
+        let noticed = expectation(description: "\(count) connection(s) left")
+        let poll = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [service] timer in
+            guard service?.liveConnections == count else { return }
+            timer.invalidate()
+            noticed.fulfill()
+        }
+        wait(for: [noticed], timeout: 5)
+        poll.invalidate()
     }
 
     func testTheFlagCrossesTheWireAndComesBackOff() throws {
@@ -378,6 +429,58 @@ final class HelperSleepXPCTests: XCTestCase {
         XCTAssertEqual(power.writes, 0)
     }
 
+    /// A helper that started over a flag and a marker of its own: the run
+    /// before this one set it and died. Over the wire the flag is Vent's, and
+    /// Vent is the one that may take it off.
+    func testAFlagLeftMarkedByAPreviousRunIsVentsToClear() throws {
+        start(flag: true, marked: true)
+        XCTAssertEqual(try report(), SleepDisabledReport(isSet: true, setByVent: true))
+        XCTAssertEqual(try report().owner, .vent)
+
+        XCTAssertNil(try set(false))
+        XCTAssertFalse(power.value)
+        XCTAssertFalse(marker.isMarked)
+        XCTAssertEqual(power.writes, 1)
+    }
+
+    /// R-10 over a real pair of connections: `ventctl awake lid on` exits and
+    /// the app's hold survives it; the flag only comes off when the last
+    /// connection holding it is gone.
+    func testAHoldBelongsToTheConnectionThatTookIt() throws {
+        start()
+        let cli = connectExtra()
+
+        XCTAssertNil(try set(true))
+        XCTAssertNil(try set(true, on: cli))
+        XCTAssertEqual(power.writes, 1, "the second hold needs no second write")
+
+        // ventctl exits, and the helper notices before anything is asserted.
+        cli.invalidate()
+        waitForConnections(1)
+        XCTAssertTrue(try report().isSet, "the app is still holding the flag")
+        XCTAssertTrue(power.value)
+        XCTAssertEqual(service.sleep?.holdCount, 1)
+
+        XCTAssertNil(try set(false))
+        XCTAssertFalse(power.value)
+    }
+
+    /// The other half of R-10: `ventctl awake lid off` gives up its own hold
+    /// and never turns the app's switch off behind its back.
+    func testOneConnectionReleasingLeavesAnothersHoldAlone() throws {
+        start()
+        let cli = connectExtra()
+        XCTAssertNil(try set(true))
+        XCTAssertNil(try set(true, on: cli))
+
+        XCTAssertNil(try set(false, on: cli), "letting go is never a failure")
+        XCTAssertTrue(power.value, "the app still holds it")
+
+        XCTAssertNil(try set(false))
+        XCTAssertFalse(power.value)
+        XCTAssertFalse(marker.isMarked)
+    }
+
     /// Restore guarantee 1 for the sleep setting, over a real connection: this
     /// is what makes a `kill -9` of Vent safe, and it is the reason a Mac
     /// cannot be left unable to sleep by a crash.
@@ -387,32 +490,32 @@ final class HelperSleepXPCTests: XCTestCase {
         XCTAssertTrue(power.value)
 
         connection.invalidate()
-
-        let cleared = expectation(description: "the flag came off")
-        let poll = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [power] timer in
-            guard let power, !power.value else { return }
-            timer.invalidate()
-            cleared.fulfill()
-        }
-        wait(for: [cleared], timeout: 5)
-        poll.invalidate()
+        waitForTheFlagToClear()
         XCTAssertFalse(marker.isMarked)
+    }
+
+    /// A client that only watches takes nothing with it when it goes.
+    func testAConnectionThatNeverHeldTheFlagTakesNothingWithIt() throws {
+        start()
+        let watcher = connectExtra()
+        XCTAssertNil(try set(true))
+        XCTAssertEqual(try report(on: watcher).owner, .vent)
+
+        watcher.invalidate()
+        waitForConnections(1)
+        XCTAssertTrue(try report().isSet, "the connection that left was holding nothing")
+        XCTAssertEqual(service.sleep?.holdCount, 1)
+
+        connection.invalidate()
+        waitForTheFlagToClear()
     }
 
     /// A helper that has no business writing the setting says so instead of
     /// pretending it worked.
     func testAServiceWithoutSleepControlSaysSo() throws {
-        power = InMemorySleepSwitch()
-        marker = InMemorySleepDisabledMarker()
-        let service = HelperService(fanHardware: InMemoryFanHardware.macBookPro(), requiresRoot: false)
-        delegate = HelperListenerDelegate(service: service)
-        listener = NSXPCListener.anonymous()
-        listener.delegate = delegate
-        listener.resume()
-        connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
-        connection.remoteObjectInterface = NSXPCInterface(with: VentHelperProtocol.self)
-        connection.resume()
-
+        startListener(
+            for: HelperService(fanHardware: InMemoryFanHardware.macBookPro(), requiresRoot: false)
+        )
         XCTAssertEqual(try set(true)?.contains("does not control the sleep setting"), true)
     }
 }

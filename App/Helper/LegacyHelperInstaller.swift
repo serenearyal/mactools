@@ -86,6 +86,13 @@ final class LegacyHelperInstaller: HelperInstalling {
 
     /// The daemon plist for a job outside an app bundle: `Program`, not
     /// `BundleProgram`. It holds no apostrophe, so the script can quote it.
+    ///
+    /// `RunAtLoad`, like the bundled plist in
+    /// `App/Resources/LaunchDaemons`: the helper clears a `SleepDisabled` flag
+    /// a previous run left behind at its own start, and that flag survives a
+    /// reboot, so the recovery has to run at boot rather than when somebody
+    /// first opens Vent. The helper waits on its listener and polls nothing,
+    /// so an idle Mac pays nothing for it.
     static func daemonPlist(programPath: String) -> String {
         """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -97,6 +104,7 @@ final class LegacyHelperInstaller: HelperInstalling {
         <key>Program</key><string>\(programPath)</string>
         <key>MachServices</key>
         <dict><key>\(HelperConstants.machServiceName)</key><true/></dict>
+        <key>RunAtLoad</key><true/>
         </dict>
         </plist>
         """

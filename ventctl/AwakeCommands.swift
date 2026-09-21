@@ -95,7 +95,7 @@ enum AwakeCommands {
             let report = try HelperCommands.sleepDisabledState()
             return switch report.owner {
             case .nobody: "set by        nobody"
-            case .vent: "set by        Vent's helper, which clears it when the last client goes"
+            case .vent: "set by        Vent's helper, which clears it when the last client holding it goes"
             case .somebodyElse: "set by        somebody else (pmset); Vent leaves it alone"
             }
         } catch {
@@ -110,17 +110,23 @@ enum AwakeCommands {
 
     /// `ventctl awake lid on|off`: the same helper call the app's switch makes.
     ///
-    /// The flag comes off again as soon as this process disconnects, which is
-    /// the moment this command exits - the helper's restore guarantee. To see
-    /// it held, turn the switch on in the app.
+    /// The hold belongs to this connection alone. `lid on` takes one, and the
+    /// helper drops it the moment this command exits and its connection drops;
+    /// `lid off` drops it too, and neither touches a hold the app is keeping.
+    /// The flag is set while anybody still holds it, so to see it stay on,
+    /// turn the switch on in the app.
     static func lid(on: Bool) throws {
         try HelperCommands.setSleepDisabled(on)
         let report = try HelperCommands.sleepDisabledState()
         print("SleepDisabled  \(report.isSet ? "1" : "0")")
         print("owner          \(report.owner.rawValue)")
-        guard on else { return }
+        guard on else {
+            print("note: this drops this command's own hold. If the app is holding the flag, it stays set.")
+            return
+        }
         print(
-            "note: the helper clears it when this command exits and its connection drops. "
+            "note: this hold is this connection's, and the helper drops it when this command exits. "
+                + "The flag then stays on only while the app, or another client, is still holding it. "
                 + "That is the safety guarantee, not a failure."
         )
     }

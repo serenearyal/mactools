@@ -2,6 +2,8 @@ import AwakeKit
 import Foundation
 import IOKit.pwr_mgt
 
+import HelperProtocol
+
 /// What the state machine needs from the power manager.
 ///
 /// A protocol because the only honest test of the state machine is one that
@@ -193,30 +195,27 @@ enum PowerAssertions {
         }
     }
 
-    /// True when somebody has run `sudo pmset disablesleep 1`.
+    /// True when this Mac has `SleepDisabled` set: either somebody ran
+    /// `sudo pmset disablesleep 1`, or Vent's own privileged helper set it for
+    /// "Stay awake with the lid closed".
     ///
     /// This is not an assertion: it is a system setting that stops the Mac
-    /// sleeping at all, and it survives a reboot. Vent never sets it, and it
-    /// would be dishonest to show a Keep Awake switch without saying that the
-    /// Mac is already held awake by something else.
+    /// sleeping at all, and it survives a reboot. This call says only that the
+    /// flag is on, never who set it - the helper's root-owned marker answers
+    /// that, over XPC, in `LidSleepBackend`. The tab needs both: a Keep Awake
+    /// switch that did not say the Mac is already held awake would be
+    /// dishonest, and one that blamed `pmset` for Vent's own flag would be
+    /// worse.
     ///
-    /// `IOPMCopySystemPowerSettings` is exported by IOKit but declared in no
-    /// public header, so it is reached through `dlsym` rather than by
-    /// redeclaring the symbol: a wrong redeclaration is a link error at best
-    /// and a crash at worst. Parsing `pmset -g` would mean a subprocess on
-    /// every read for the same one integer.
+    /// The read itself is `SystemSleepFlag.read()`, shared with the helper so
+    /// the `dlsym` of an unsupported symbol exists once.
     static func sleepDisabled() -> Bool? {
-        typealias Copy = @convention(c) () -> Unmanaged<CFDictionary>?
-        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "IOPMCopySystemPowerSettings")
-        else { return nil }
-        let copy = unsafeBitCast(symbol, to: Copy.self)
-        guard let settings = copy()?.takeRetainedValue() as? [String: Any] else { return nil }
-        guard let value = settings["SleepDisabled"] as? NSNumber else { return false }
-        return value.boolValue
+        SystemSleepFlag.value()
     }
 
-    /// What the user would type to undo it. Shown as selectable text with a
-    /// copy button, never run by Vent: it needs root, and a Mac that cannot
-    /// sleep is the user's own decision to reverse.
+    /// What the user would type to undo a flag that is not Vent's. Shown as
+    /// selectable text with a copy button, never run by Vent: it needs root,
+    /// and somebody else's decision to keep this Mac awake is theirs to
+    /// reverse. Vent's own flag comes off with the switch that set it.
     static let enableSleepCommand = "sudo pmset disablesleep 0"
 }

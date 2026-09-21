@@ -62,6 +62,13 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
     private let terminationQueue = DispatchQueue(
         label: "\(HelperConstants.helperBundleIdentifier).termination"
     )
+    /// Set once the sleep flag has been cleared on the way out, so the signal
+    /// path and `atexit` do not both wait on powerd for the same clear.
+    private let sleepClearedOnTheWayOut = Mutex(false)
+    /// The tokens of each live connection, so a call can be charged to the
+    /// connection that made it. `NSXPCConnection.current()` inside a method is
+    /// the same object the listener delegate accepted.
+    private let tokensByConnection = Mutex<[ConnectionKey: ClientTokens]>([:])
 
     /// The one service of the process, for the C-level handlers that have
     /// nowhere to carry context.
@@ -121,16 +128,21 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
     /// One owner for both, and it is this class: two sets of handlers on one
     /// signal would race to call `exit(0)`, and the loser would restore
     /// nothing. The fans keep their own hardware knowledge; this decides when.
+    /// The fans go first on every way out, and that order is deliberate: an
+    /// SMC write is a local driver call that takes microseconds, while the
+    /// sleep flag goes to powerd over IPC and is bounded by nothing. A fan
+    /// left forced is the faster way to cook this Mac, so it is never made to
+    /// wait behind a power manager that is busy.
     func installTerminationHandlers() {
         let sources = [SIGTERM, SIGINT, SIGHUP].map { number -> DispatchSourceSignal in
             signal(number, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: number, queue: terminationQueue)
             source.setEventHandler { [weak self] in
                 self?.log.notice(
-                    "signal \(number, privacy: .public): clearing sleep disabled, every fan to Auto"
+                    "signal \(number, privacy: .public): every fan to Auto, then clearing sleep disabled"
                 )
-                self?.sleep?.clearForTermination()
                 self?.fans?.restoreAllAutoOnSignal()
+                self?.clearSleepBeforeExit()
                 exit(0)
             }
             source.resume()
@@ -144,27 +156,82 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
         // static above.
         atexit {
             guard let service = HelperService.shared.withLock({ $0 }) else { return }
-            service.sleep?.clearForTermination()
             service.fans?.restoreAllAutoNow()
+            service.clearSleepBeforeExit()
         }
+    }
+
+    /// How long the way out waits for the power manager. Long enough for a
+    /// call that answers, short enough that nothing else on the way out is
+    /// held up by one that does not.
+    private static let sleepClearDeadline = DispatchTimeInterval.seconds(2)
+
+    /// Clears the sleep flag with a deadline, once per process.
+    ///
+    /// `IOPMSetSystemPowerSetting` is a round trip to powerd, and a daemon
+    /// that hangs there on SIGTERM is one launchd kills with SIGKILL a few
+    /// seconds later - after which nothing of this process runs at all. If the
+    /// deadline passes the marker file is still on disk, so the next start of
+    /// the helper clears the flag (guarantee 3), and `RunAtLoad` means that
+    /// start happens at boot rather than at the first connection.
+    private func clearSleepBeforeExit() {
+        guard let sleep, !sleepClearedOnTheWayOut.withLock({ $0 }) else { return }
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            sleep.clearForTermination()
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + Self.sleepClearDeadline) == .success else {
+            log.error("the power manager did not clear sleep disabled in time; the marker survives for the next start")
+            return
+        }
+        sleepClearedOnTheWayOut.withLock { $0 = true }
     }
 
     /// Guarantee 3 at start, for both: whatever a previous run left behind is
     /// undone before the first client can connect.
+    ///
+    /// The fans first here too, and for the reason they go first on the way
+    /// out: the SMC is local and answers at once, while the sleep recovery
+    /// goes to powerd. A fan a killed run left forced must not wait behind it.
     func restoreAtStart() {
-        sleep?.recoverAtStart()
         fans?.startWithAutoRestore()
+        sleep?.recoverAtStart()
     }
 
     /// Guarantee 1: one token per XPC connection, so the last client to leave
-    /// takes the fans and the sleep setting with it.
-    func clientArrived() -> ClientTokens {
-        ClientTokens(fans: fans?.clientArrived(), sleep: sleep?.clientArrived())
+    /// takes the fans with it and every connection takes its own sleep hold.
+    ///
+    /// The connection is remembered here as well, because the sleep flag is
+    /// held per connection: the method that sets it has to know which one is
+    /// asking, and `NSXPCConnection.current()` gives it the same object.
+    func clientArrived(_ connection: NSXPCConnection? = nil) -> ClientTokens {
+        let tokens = ClientTokens(fans: fans?.clientArrived(), sleep: sleep?.clientArrived())
+        if let connection {
+            tokensByConnection.withLock { $0[Self.key(for: connection)] = tokens }
+        }
+        return tokens
     }
 
-    func clientLeft(_ tokens: ClientTokens) {
+    func clientLeft(_ tokens: ClientTokens, from key: ConnectionKey? = nil) {
+        if let key {
+            tokensByConnection.withLock { $0[key] = nil }
+        }
         if let token = tokens.fans { fans?.clientLeft(token: token) }
         if let token = tokens.sleep { sleep?.clientLeft(token: token) }
+    }
+
+    /// How many connections the service is tracking. The XPC tests wait on it
+    /// to know that an invalidation handler has run.
+    var liveConnections: Int { tokensByConnection.withLock { $0.count } }
+
+    /// How one connection is named in the table above. An identity, not a
+    /// reference: nothing here keeps a connection alive, and the entry is
+    /// dropped on invalidation, which happens while the object is still there.
+    typealias ConnectionKey = ObjectIdentifier
+
+    static func key(for connection: NSXPCConnection) -> ConnectionKey {
+        ObjectIdentifier(connection)
     }
 
     /// The tokens of one connection: one per thing that has to be given back.
@@ -272,6 +339,13 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
     /// The one write in this helper that changes how the whole Mac behaves, so
     /// every call is logged with the client that asked for it.
     ///
+    /// The hold belongs to the connection, not to the helper: the flag is set
+    /// while at least one connection that asked for it is alive, and this call
+    /// only ever adds or drops the caller's own hold. That is what makes
+    /// `ventctl awake lid off` mean "I am done with it" rather than "clear it
+    /// even though the app is holding it", and what makes a `ventctl` that
+    /// exits take nothing but its own hold with it.
+    ///
     /// Clearing is never refused for lack of root in spirit - but it does need
     /// root to happen at all, so the gate stands and the answer says so.
     func setSleepDisabled(_ disabled: Bool, reply: @escaping @Sendable (String?) -> Void) {
@@ -283,15 +357,27 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
             reply(Self.noSleepControl)
             return
         }
-        let client = NSXPCConnection.current()?.processIdentifier ?? -1
-        let failure = sleep.set(disabled)
+        let connection = NSXPCConnection.current()
+        guard let token = connection.flatMap({ tokens(for: $0)?.sleep }) else {
+            // No connection means no owner for the hold, and a hold nobody
+            // owns is one nothing would ever give back.
+            reply("the helper cannot tell which connection is asking for the sleep setting")
+            return
+        }
+        let client = connection?.processIdentifier ?? -1
+        let failure = sleep.set(disabled, client: token)
         log.notice(
             """
-            sleep disabled \(disabled ? "set" : "cleared", privacy: .public) for client pid \
-            \(client, privacy: .public): \(failure ?? "done", privacy: .public)
+            sleep disabled \(disabled ? "held" : "released", privacy: .public) by client pid \
+            \(client, privacy: .public): \(failure ?? "done", privacy: .public), \
+            \(sleep.holdCount, privacy: .public) holder(s) left
             """
         )
         reply(failure)
+    }
+
+    private func tokens(for connection: NSXPCConnection) -> ClientTokens? {
+        tokensByConnection.withLock { $0[Self.key(for: connection)] }
     }
 
     private static let noSleepControl = "this build of the helper does not control the sleep setting"

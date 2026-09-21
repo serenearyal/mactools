@@ -1,5 +1,6 @@
 import AwakeKit
 import Foundation
+import Synchronization
 
 /// Whether Vent is holding this Mac awake, and until when.
 enum KeepAwakeState: Equatable, Sendable {
@@ -229,5 +230,274 @@ struct KeepAwakeMachine: Equatable, Sendable {
         if power.thermal == .critical { return "Turned off: this Mac is too hot." }
         guard let percent = power.percent else { return "Turned off: the battery ran low." }
         return "Turned off: the battery fell to \(percent) %."
+    }
+}
+
+// MARK: - The lid hold, reconciled
+
+/// The system-wide flag as the helper last reported it back.
+///
+/// Read, never remembered: what the machine asked for says nothing about what
+/// this Mac is doing, and a clear that was refused leaves the two apart.
+struct LidSleepFacts: Equatable, Sendable {
+    /// `SleepDisabled` is set, by anybody.
+    var flagSet = false
+    /// And the helper's own marker says Vent set it, so Vent may clear it.
+    var isOurs = false
+}
+
+/// What the reconciler needs from the world: one write and one read-back.
+///
+/// Neither call is typed to XPC and neither throws, so the sequencing and the
+/// retries can be driven by a test with no helper, no root, and no Mac that
+/// stops sleeping for the length of the suite.
+protocol LidSleepPort: Sendable {
+    /// Ask for the flag. Nil when the helper did it, the reason when it refused.
+    func write(_ on: Bool) async -> String?
+    /// Read it back. Nil when the read itself failed.
+    func readBack() async -> LidSleepFacts?
+}
+
+/// One pass of the reconciler: what it wanted, what it did, what it found.
+struct LidSleepOutcome: Equatable, Sendable {
+    /// The state this pass was trying to reach.
+    var wanted: Bool
+    /// True when the helper was actually asked to change something.
+    var wrote: Bool
+    /// The helper's refusal, nil when it obeyed or was not asked.
+    var refusal: String?
+    /// The read-back, nil when the read itself failed.
+    var facts: LidSleepFacts?
+    /// True while the wanted state and the read-back still differ and another
+    /// attempt is scheduled. The UI says so: nothing is ever silently stuck.
+    var retrying: Bool
+}
+
+/// How long to wait before going back for a flag that would not move.
+///
+/// 1 s, 2 s, 4 s, 8 s, then every 30 s for as long as the two states differ.
+/// Each wait is one tolerant sleep and not a poll: when the wanted state and
+/// the read-back agree, nothing at all is scheduled.
+enum LidSleepRetry {
+    static let ladder: [Duration] = [.seconds(1), .seconds(2), .seconds(4), .seconds(8)]
+    /// What the ladder settles into. Slow enough to cost nothing, often enough
+    /// that a helper which comes back is used within half a minute.
+    static let floor = Duration.seconds(30)
+
+    /// The wait after the given attempt, counting from one.
+    static func delay(attempt: Int) -> Duration {
+        guard attempt > 1 else { return ladder[0] }
+        guard attempt <= ladder.count else { return floor }
+        return ladder[attempt - 1]
+    }
+}
+
+/// The one path every request for the lid flag takes.
+///
+/// Two jobs, and they are the same job. The first is order: a slow `set(false)`
+/// and a fast `set(true)` that each had their own task could land in either
+/// order and leave a Mac that cannot sleep with its lid shut. Here one worker
+/// runs at a time, it always reads the newest wanted value, and a result that
+/// comes back for an older value never decides that the work is done.
+///
+/// The second is reconciliation. A request is not a result: the helper can
+/// refuse, it can be missing, and the flag can be changed by somebody else. So
+/// every pass reads the flag back and compares it with what is wanted, and
+/// while they differ the ladder above goes back for it. This is what keeps
+/// "Keep Awake off" from leaving `SleepDisabled` set, which is a Mac that
+/// cooks in a closed bag.
+///
+/// A final class over a `Mutex` rather than an actor: the wanted value has to
+/// be written synchronously, at the instant the switch moves, so that two
+/// requests in the same run loop turn cannot reach the worker out of order.
+final class LidSleepReconciler: Sendable {
+    /// Called after every pass, on whatever thread the worker runs on. The
+    /// controller hops to the main actor itself.
+    typealias Observer = @Sendable (LidSleepOutcome) async -> Void
+
+    private struct State {
+        var wanted = false
+        /// The last read-back that arrived. What a failed read falls back to.
+        var known: LidSleepFacts?
+        /// True while something has asked for a pass that has not started yet.
+        var dirty = false
+        var worker: Task<Void, Never>?
+        var waiter: Task<Void, Never>?
+        var observer: Observer?
+    }
+
+    private let port: any LidSleepPort
+    private let sleep: @Sendable (Duration) async -> Void
+    private let state = Mutex(State())
+
+    init(
+        port: any LidSleepPort,
+        sleep: @escaping @Sendable (Duration) async -> Void = LidSleepReconciler.wait
+    ) {
+        self.port = port
+        self.sleep = sleep
+    }
+
+    /// One tolerant one-shot sleep. A retry is not a deadline, and a wakeup the
+    /// system can fold into one it was making anyway costs the battery nothing.
+    static func wait(_ delay: Duration) async {
+        try? await Task.sleep(for: delay, tolerance: delay / 5)
+    }
+
+    func observe(_ observer: @escaping Observer) {
+        state.withLock { $0.observer = observer }
+    }
+
+    /// The wanted state moved. Synchronous on purpose: the last caller in this
+    /// run loop turn wins, whichever task reaches the helper first.
+    func request(_ on: Bool) {
+        kick { $0.wanted = on }
+    }
+
+    /// Read the flag back now and act only if it differs from what is wanted.
+    ///
+    /// The tab's five-second list, the popover appearing, and every power and
+    /// thermal push the controller already receives all come through here.
+    func verify() {
+        kick { _ in }
+    }
+
+    /// The quit path: want it clear, and wait for the chain to reach that.
+    ///
+    /// The caller bounds the wait; this is the part that must not be raced.
+    /// Asking the helper from a second task while a request was in flight is
+    /// exactly how a `set(true)` lands after a `set(false)`.
+    func clearForQuit() async {
+        kick { $0.wanted = false }
+        await settled()
+    }
+
+    /// Waits for the current chain to end. The quit path and the tests use it.
+    func settled() async {
+        guard let worker = state.withLock({ $0.worker }) else { return }
+        await worker.value
+    }
+
+    /// What the last read-back said, for a test and for a log line.
+    var lastKnown: LidSleepFacts? { state.withLock { $0.known } }
+
+    // MARK: - The rules
+
+    /// Whether the flag has to be written to reach `target`.
+    ///
+    /// Nil facts mean nothing has ever been read back: only a hold that is
+    /// wanted is worth a blind write, because a clear with nothing to clear
+    /// would call the helper for nothing at every launch.
+    static func needsWrite(target: Bool, facts: LidSleepFacts?) -> Bool {
+        guard let facts else { return target }
+        return target ? !facts.isOurs : facts.isOurs
+    }
+
+    /// Whether the two states still differ, so another attempt is owed.
+    ///
+    /// A flag somebody else set is not a difference to retry: the helper will
+    /// not take over a hold it did not make, and the UI says who holds it. A
+    /// hold of ours that is still there when nobody wants it is the one case
+    /// that retries for as long as it lasts.
+    static func retries(target: Bool, facts: LidSleepFacts?) -> Bool {
+        guard let facts else { return target }
+        return target ? !facts.isOurs && !facts.flagSet : facts.isOurs
+    }
+
+    // MARK: - The worker
+
+    private func kick(_ change: (inout State) -> Void) {
+        state.withLock { state in
+            change(&state)
+            state.dirty = true
+            // A retry that is waiting wakes up instead of sitting out its
+            // ladder step: the user just moved the switch.
+            state.waiter?.cancel()
+            guard state.worker == nil else { return }
+            // Made under the lock so the handle exists the moment this returns,
+            // which is what lets the quit path wait for this very chain. A task
+            // never starts inline, so nothing runs while the lock is held.
+            state.worker = Task { await self.run() }
+        }
+    }
+
+    private func run() async {
+        var attempt = 0
+        var last: Bool?
+        while true {
+            let target = state.withLock { state -> Bool in
+                state.dirty = false
+                return state.wanted
+            }
+            // A fresh intent starts at the bottom of the ladder; the same
+            // failure twice climbs it.
+            if target != last {
+                attempt = 0
+                last = target
+            }
+
+            let outcome = await pass(target: target)
+            if let observer = state.withLock({ $0.observer }) { await observer(outcome) }
+
+            // Whatever arrived while the helper was answering wins: an older
+            // result never decides that this is finished.
+            if state.withLock({ $0.dirty || $0.wanted != target }) { continue }
+
+            if outcome.retrying {
+                attempt += 1
+                await wait(LidSleepRetry.delay(attempt: attempt))
+                continue
+            }
+            let done = state.withLock { state -> Bool in
+                guard !state.dirty else { return false }
+                state.worker = nil
+                return true
+            }
+            if done { return }
+        }
+    }
+
+    private func pass(target: Bool) async -> LidSleepOutcome {
+        let before = await port.readBack()
+        let knownBefore = record(before)
+        guard LidSleepReconciler.needsWrite(target: target, facts: knownBefore) else {
+            return LidSleepOutcome(
+                wanted: target,
+                wrote: false,
+                refusal: nil,
+                facts: before,
+                retrying: LidSleepReconciler.retries(target: target, facts: knownBefore)
+            )
+        }
+        let refusal = await port.write(target)
+        let after = await port.readBack()
+        return LidSleepOutcome(
+            wanted: target,
+            wrote: true,
+            refusal: refusal,
+            facts: after,
+            // The read-back has the last word, and when it fails the last one
+            // that worked does: a hold this app knows it took is not forgotten
+            // because the helper went missing for a moment.
+            retrying: LidSleepReconciler.retries(target: target, facts: record(after))
+        )
+    }
+
+    /// Keeps the newest read-back and answers with the best knowledge there is.
+    private func record(_ facts: LidSleepFacts?) -> LidSleepFacts? {
+        state.withLock { state in
+            if let facts { state.known = facts }
+            return state.known
+        }
+    }
+
+    private func wait(_ delay: Duration) async {
+        let waiter = state.withLock { state -> Task<Void, Never> in
+            let waiter = Task { await self.sleep(delay) }
+            state.waiter = waiter
+            return waiter
+        }
+        await waiter.value
+        state.withLock { if $0.waiter == waiter { $0.waiter = nil } }
     }
 }

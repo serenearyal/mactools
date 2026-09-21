@@ -34,11 +34,25 @@ final class KeepAwakeController {
     /// Why the lid hold is not on, when the user asked for it: no helper, an
     /// old helper, or a flag somebody else set. Nil while all is well.
     private(set) var lidFailure: String?
+    /// True while Vent wants the system-wide flag clear and the read-back still
+    /// says the hold is Vent's. The retry is running, and the UI has to say so:
+    /// a Mac that cannot sleep with its lid shut cooks in a bag, and "sleeps as
+    /// usual" would be a lie at the worst possible moment.
+    private(set) var lidClearPending = false
+    /// The reinstall prompt, when the installed helper is too old to know what
+    /// the lid option is.
+    ///
+    /// Mirrored from `HelperGate`, which is a plain shared value with no
+    /// observation: a view that read the gate itself would never redraw when
+    /// the helper is installed again. Refreshed on every read-back.
+    private(set) var lidNeedsReinstall = false
     private(set) var power = PowerStatus()
 
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private let backend: KeepAwakeBackend
-    @ObservationIgnored private let lid: any LidSleepBackend
+    /// Every lid request and every lid read-back goes through this one, in
+    /// order, with the retry that a refused clear needs.
+    @ObservationIgnored private let reconciler: LidSleepReconciler
     @ObservationIgnored private var machine: KeepAwakeMachine
     @ObservationIgnored private var expiryTimer: Timer?
     @ObservationIgnored private var countdownTimer: Timer?
@@ -62,12 +76,17 @@ final class KeepAwakeController {
     ) {
         self.settings = settings
         self.backend = backend
-        self.lid = lid
+        reconciler = LidSleepReconciler(port: lid)
         machine = KeepAwakeMachine(options: settings.keepAwakeOptions)
     }
 
     /// Called once at launch. Reads the battery and subscribes to its pushes.
     func start() {
+        // The worker runs on the cooperative pool, so this hops rather than
+        // assuming anything about the thread it is called back on.
+        reconciler.observe { [weak self] outcome in
+            await MainActor.run { self?.absorb(outcome) }
+        }
         let monitor = PowerSourceMonitor { [weak self] reading in
             self?.apply(.power(reading, now: .now))
         }
@@ -78,7 +97,7 @@ final class KeepAwakeController {
         // and it does that when the connection dies and again at its own
         // start. This only makes sure the first thing the user sees is the
         // truth about their Mac.
-        refreshSleepSetting()
+        reconcile()
     }
 
     // MARK: - What the UI reads
@@ -109,6 +128,9 @@ final class KeepAwakeController {
     /// where the duration menu and the switch leave about 180 pt: a second
     /// line that wraps makes that row taller than the five beside it.
     var detailText: String {
+        // First, ahead of the countdown and ahead of the guard's own words: a
+        // hold that would not come off is the one thing here that can hurt.
+        if lidClearPending { return KeepAwakeController.clearRetryText }
         if state.isOn {
             guard let remaining = remainingText else { return blocking.title }
             return "\(blocking.title), \(remaining) left"
@@ -118,9 +140,8 @@ final class KeepAwakeController {
         return blocking.title
     }
 
-    /// The reinstall prompt, when the installed helper is too old to know what
-    /// the lid option is. Nil when there is nothing to reinstall.
-    var lidNeedsReinstall: Bool { HelperGate.shared.blockedReason != nil }
+    /// What the tab and the popover row say while a clear is being retried.
+    static let clearRetryText = "Lid-close sleep is still blocked - retrying"
 
     /// True when the flag is set and it is not Vent's. Nothing destructive is
     /// ever offered against it.
@@ -185,7 +206,8 @@ final class KeepAwakeController {
         listTimer = nil
         guard visible else { return }
         refreshList()
-        refreshSleepSetting()
+        // One read of who owns the flag when the tab appears, whoever owns it.
+        reconcile()
         let timer = Timer.scheduledTimer(
             withTimeInterval: KeepAwakeController.listInterval,
             repeats: true
@@ -199,6 +221,18 @@ final class KeepAwakeController {
     private func refreshList() {
         assertions = PowerAssertions.all()
         verify()
+        // The tab is the one surface that watches the flag over time, so its
+        // five seconds are also when a helper that came back is noticed. Only
+        // while Vent has something at stake: a flag that is somebody else's is
+        // read once, when the tab appears, and not every five seconds after.
+        guard hasLidStake else { return }
+        reconcile()
+    }
+
+    /// True while there is a hold Vent wants or a hold Vent took. Nothing is
+    /// asked of the helper outside it.
+    private var hasLidStake: Bool {
+        machine.lidRequested || lidIsOurs || lidClearPending
     }
 
     // MARK: - The read-back
@@ -214,6 +248,19 @@ final class KeepAwakeController {
         let held = PowerAssertions.heldBy()
         let flag = PowerAssertions.sleepDisabled() ?? false
         sleepDisabled = flag
+        // A flag that is gone is nobody's, and there is nothing left to retry.
+        if !flag {
+            lidIsOurs = false
+            lidClearPending = false
+        }
+        // The gate is a shared value with no observation of its own, so the
+        // hint under the switch only moves when this mirror does.
+        let blocked = HelperGate.shared.blockedReason != nil
+        if lidNeedsReinstall, !blocked, machine.lidRequested {
+            // The helper was just reinstalled with the switch still on.
+            reconciler.request(true)
+        }
+        lidNeedsReinstall = blocked
         blocking = AwakeBlocking(
             idleSleepHeld: held.idleSystemSleep,
             displaySleepHeld: held.idleDisplaySleep,
@@ -222,56 +269,60 @@ final class KeepAwakeController {
         )
     }
 
-    /// Asks the helper who owns the flag, then redraws. Nothing calls this on
-    /// a timer: it runs at launch, after every lid request and whenever the
-    /// tab's five-second list finds a flag whose owner is not known yet.
-    private func refreshSleepSetting() {
+    /// Compares what the machine wants with what the helper says is true, and
+    /// closes the gap. Nothing polls: this runs at launch, after every lid
+    /// request, on every power and thermal push, and while the tab's list is
+    /// on screen.
+    ///
+    /// The local flag read is what keeps the helper out of it: with the flag
+    /// clear and nothing wanted there is no hold to own, so no XPC call is
+    /// made at all.
+    private func reconcile() {
         let flag = PowerAssertions.sleepDisabled() ?? false
-        guard flag || machine.lidRequested else {
+        guard flag || hasLidStake else {
             lidIsOurs = false
             verify()
             return
         }
-        Task { [lid] in
-            let report = try? await lid.report()
-            await MainActor.run {
-                self.lidIsOurs = report?.setByVent ?? false
-                self.verify()
-            }
-        }
+        reconciler.verify()
     }
 
-    /// One request to the helper, and a read-back of what it did.
+    /// The machine asked for the flag. The reconciler owns the order and the
+    /// retry; this only records the intent, and it records it synchronously so
+    /// that two requests in the same turn cannot reach the helper out of order.
+    ///
+    /// A hold is not asked of a helper the gate has already refused: the
+    /// answer is known, and chasing it would wake the app every 30 s for as
+    /// long as the switch is on. A clear is always sent.
     private func requestLid(_ on: Bool) {
-        Task { [lid] in
-            var refusal: String?
-            do {
-                try await lid.set(on)
-            } catch {
-                refusal = error.localizedDescription
-            }
-            let report = try? await lid.report()
-            await MainActor.run {
-                // A failed clear is worth a log line and nothing on screen:
-                // the helper clears the flag by itself when this app goes
-                // away, so there is nothing for the user to do about it.
-                if on {
-                    self.lidFailure = refusal
-                } else if let refusal {
-                    AppLog.app.error("the lid hold could not be cleared: \(refusal, privacy: .public)")
-                }
-                self.lidIsOurs = report?.setByVent ?? false
-                self.verify()
-                AppLog.app.notice(
-                    """
-                    lid hold \(on ? "requested" : "released", privacy: .public): \
-                    flag \(self.blocking.lidSleepBlocked, privacy: .public), \
-                    ours \(self.blocking.lidSleepIsOurs, privacy: .public)\
-                    \(refusal.map { ", \($0)" } ?? "", privacy: .public)
-                    """
-                )
-            }
+        reconciler.request(on && HelperGate.shared.blockedReason == nil)
+    }
+
+    /// What came back from a pass over the flag. The one place the UI learns
+    /// whether the hold is on, off, refused, or still being chased.
+    private func absorb(_ outcome: LidSleepOutcome) {
+        if let facts = outcome.facts { lidIsOurs = facts.isOurs }
+        // Off and still held: the user has to be told, because this is the
+        // state where a closed Mac gets hot in a bag.
+        lidClearPending = !outcome.wanted && outcome.retrying
+        if outcome.wanted {
+            lidFailure = outcome.refusal
+        } else if let refusal = outcome.refusal {
+            AppLog.app.error(
+                "the lid hold could not be cleared: \(refusal, privacy: .public); going back for it"
+            )
         }
+        verify()
+        guard outcome.wrote || outcome.retrying else { return }
+        AppLog.app.notice(
+            """
+            lid hold \(outcome.wanted ? "requested" : "released", privacy: .public): \
+            flag \(self.blocking.lidSleepBlocked, privacy: .public), \
+            ours \(self.blocking.lidSleepIsOurs, privacy: .public), \
+            retrying \(outcome.retrying, privacy: .public)\
+            \(outcome.refusal.map { ", \($0)" } ?? "", privacy: .public)
+            """
+        )
     }
 
     // MARK: - The quit path
@@ -289,13 +340,25 @@ final class KeepAwakeController {
         listTimer?.invalidate()
         monitor?.stop()
         backend.release()
-        guard machine.lidRequested else { return }
-        let lid = self.lid
+        // Not `machine.lidRequested`: a clear that was refused leaves the
+        // machine believing the flag is gone while this Mac still cannot sleep
+        // with its lid shut. The flag itself, and the helper's marker on it,
+        // are the only things worth trusting here - and the reconciler asks
+        // the helper before it writes, so a flag that is somebody else's costs
+        // one read and nothing more.
+        let flagSet = PowerAssertions.sleepDisabled() ?? false
+        guard flagSet || machine.lidRequested || lidIsOurs else { return }
+        let reconciler = self.reconciler
         let semaphore = DispatchSemaphore(value: 0)
         Task.detached {
-            try? await lid.set(false)
+            await reconciler.clearForQuit()
             semaphore.signal()
         }
+        // A bounded wait on the main thread, the same shape as the fan quit
+        // path `FanStore.restoreAllAutoOnTermination`: `HelperConnection` is an
+        // actor off the main actor, `applicationWillTerminate` cannot await,
+        // and a quit that hangs on a dead helper is worse than a flag the
+        // dying connection clears anyway.
         if semaphore.wait(timeout: .now() + KeepAwakeController.terminationWait) == .timedOut {
             AppLog.app.error(
                 "the helper did not confirm the lid hold was cleared; the connection dropping clears it"
@@ -324,7 +387,8 @@ final class KeepAwakeController {
         let until = state.expiry.map { "\($0.timeIntervalSinceNow.rounded()) s" } ?? "indefinite"
         return "\(state.isOn ? "on (\(until))" : "off"), holding \(backend.isHolding), "
             + "verified idle \(blocking.idleSleepHeld), display \(blocking.displaySleepHeld), "
-            + "lid \(blocking.lidSleepBlocked) (ours \(blocking.lidSleepIsOurs))"
+            + "lid \(blocking.lidSleepBlocked) (ours \(blocking.lidSleepIsOurs)), "
+            + "clear pending \(lidClearPending)"
     }
 
     /// The Keep Awake tab and the popover row ask for one read-back when they
@@ -332,7 +396,7 @@ final class KeepAwakeController {
     /// five-second timer.
     func verifyNow() {
         verify()
-        refreshSleepSetting()
+        reconcile()
     }
 
     // MARK: - Effects
@@ -359,6 +423,12 @@ final class KeepAwakeController {
         // Straight after the create or the release, so the switch on screen
         // and the kernel agree from the first frame.
         verify()
+        // And the helper's half of it. Every power and thermal push arrives
+        // here, so a hold that would not come off is chased on each of them as
+        // well as on its own ladder. Only when Vent has a stake in the flag:
+        // a flag that belongs to `pmset` must not wake the helper once a
+        // minute for an answer nobody acts on.
+        if hasLidStake { reconcile() }
         updateCountdown()
     }
 

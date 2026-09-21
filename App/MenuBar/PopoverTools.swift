@@ -60,6 +60,24 @@ struct PopoverTools: View {
     /// power manager: "Idle sleep blocked", or "Idle sleep and lid-close sleep
     /// blocked" when the helper holds the system-wide setting too.
     private var keepAwakeRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            keepAwakeToolRow
+            // The one thing in this panel that is worth a second line of its
+            // own: Vent wants the system-wide flag off, the read-back says it
+            // is still Vent's, and a closed Mac that cannot sleep gets hot.
+            if keepAwake.lidClearPending {
+                hint {
+                    PopoverHint(
+                        text: KeepAwakeController.clearRetryText
+                            + ". This Mac does not sleep with the lid closed yet.",
+                        tint: .red
+                    )
+                }
+            }
+        }
+    }
+
+    private var keepAwakeToolRow: some View {
         ToolRow(
             title: "Keep Awake",
             symbolName: keepAwake.isOn ? "cup.and.saucer.fill" : "cup.and.saucer",

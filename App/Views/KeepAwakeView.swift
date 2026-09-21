@@ -136,7 +136,21 @@ struct KeepAwakeView: View {
 
     @ViewBuilder
     private var lidHint: some View {
-        if keepAwake.lidNeedsReinstall {
+        if keepAwake.lidClearPending {
+            // Ahead of everything else under this switch: Vent wants the flag
+            // off, this Mac still will not sleep with the lid shut, and the
+            // user is the one carrying it about.
+            Label(
+                KeepAwakeController.clearRetryText
+                    + ". This Mac still does not sleep with the lid closed. "
+                    + "Vent keeps asking the helper; "
+                    + "\"\(PowerAssertions.enableSleepCommand)\" ends it at once.",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(.red)
+            .fixedSize(horizontal: false, vertical: true)
+        } else if keepAwake.lidNeedsReinstall {
             HStack(spacing: Layout.gutter) {
                 Label("Reinstall the helper to use this", systemImage: "arrow.triangle.2.circlepath")
                     .font(.caption)

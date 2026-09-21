@@ -11,6 +11,8 @@ let service = HelperService.daemon()
 // Order matters. The ways out are armed (guarantee 2), then every fan is put
 // back under firmware control and a sleep setting a previous run left behind
 // is cleared (guarantee 3), all before the first client can ask for anything.
+// `RunAtLoad` in the daemon plist is what brings this process up at boot, so
+// the recovery of a flag that survived a reboot does not wait for a client.
 service.installTerminationHandlers()
 service.restoreAtStart()
 

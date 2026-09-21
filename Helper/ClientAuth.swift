@@ -38,14 +38,20 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecked 
         connection.exportedObject = service
 
         // Restore guarantee 1: the fans and the system sleep setting belong to
-        // the clients, and the last one to leave takes the fans back to Auto
-        // and lets this Mac sleep again. XPC can call both handlers for one
-        // connection, and the registries ignore the second.
+        // the clients. The last one to leave takes the fans back to Auto, and
+        // each connection takes its own hold on the sleep setting with it, so
+        // the flag comes off when the last connection holding it goes. XPC can
+        // call both handlers for one connection, and the registries ignore the
+        // second.
+        //
+        // The handlers hold the connection's key, never the connection: a
+        // handler the connection itself owns must not own it back.
         let service = self.service
-        let tokens = service.clientArrived()
+        let tokens = service.clientArrived(connection)
+        let key = HelperService.key(for: connection)
         let gone: @Sendable () -> Void = { [log] in
             log.info("client pid \(pid, privacy: .public) gone")
-            service.clientLeft(tokens)
+            service.clientLeft(tokens, from: key)
         }
         connection.invalidationHandler = gone
         connection.interruptionHandler = gone
