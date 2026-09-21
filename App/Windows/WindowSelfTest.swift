@@ -9,7 +9,7 @@ import WindowKit
 /// An XCTest bundle has no Accessibility grant and an unbundled binary vends no
 /// accessibility server at all, so neither side of a window move can be tested
 /// from `xcodebuild test`. This runs in the signed app, which does have the
-/// grant, against `VentAXProbe`: an app of ours, launched by us, that exists to
+/// grant, against `MacToolsAXProbe`: an app of ours, launched by us, that exists to
 /// be pushed around.
 ///
 /// It touches nothing else. Every move goes to the probe window it found by
@@ -47,7 +47,7 @@ enum WindowSelfTest {
             return [Row(name: "screen", passed: false, expected: "a display", actual: "none")]
         }
 
-        let title = "Vent AX Probe \(UUID().uuidString.prefix(8))"
+        let title = "MacTools AX Probe \(UUID().uuidString.prefix(8))"
         let start = CGRect(
             x: screen.visibleFrame.minX + 60,
             y: screen.visibleFrame.minY + 60,

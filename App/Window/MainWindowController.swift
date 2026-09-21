@@ -12,7 +12,10 @@ import SwiftUI
 @MainActor
 final class MainWindowController {
     static let windowID = "main"
-    static let frameAutosaveName = "VentMainWindow"
+    /// Owned by `SettingsMigration`, which knows this name and the one the app
+    /// used before the rename: the saved frame is copied from one key to the
+    /// other, and two spellings of it would quietly lose the window position.
+    static let frameAutosaveName = SettingsMigration.mainWindowAutosaveName
 
     private weak var window: NSWindow?
     private var openAction: (() -> Void)?
@@ -184,7 +187,7 @@ final class MainWindowController {
     /// Occlusion is deliberately not part of it. A window another window covers
     /// is one click away from the user, and treating it as hidden emptied the
     /// tables and tore holes in the graphs every time something was dragged
-    /// over Vent. It is reported separately, and it may only slow the sampling
+    /// over MacTools. It is reported separately, and it may only slow the sampling
     /// down.
     private func updateVisibility(forcedHidden: Bool = false) {
         let visible = !forcedHidden

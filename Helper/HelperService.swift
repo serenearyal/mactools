@@ -10,7 +10,7 @@ import SysMetrics
 
 /// The one logger of the helper process.
 ///
-/// `log stream --predicate 'subsystem == "com.serenearyal.vent"'` shows the app
+/// `log stream --predicate 'subsystem == "com.serenearyal.mactools"'` shows the app
 /// and the helper together, which is what a fan bug needs.
 enum HelperLog {
     static let logger = Logger(subsystem: HelperConstants.appBundleIdentifier, category: "helper")
@@ -36,7 +36,7 @@ enum HelperBuild {
 /// property is immutable, `SMCConnection` locks around the driver call and the
 /// fan coordinator owns a serial queue of its own, so this class needs none.
 /// `@unchecked` because `NSObject` is not `Sendable`.
-final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
+final class HelperService: NSObject, MacToolsHelperProtocol, @unchecked Sendable {
     /// One connection for the life of the process: opening the user client
     /// costs a mach round trip and the daemon may answer thousands of reads.
     private let smc: SMCConnection?
@@ -240,7 +240,7 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
         let sleep: UInt64?
     }
 
-    // MARK: - VentHelperProtocol
+    // MARK: - MacToolsHelperProtocol
 
     func ping(reply: @escaping @Sendable (String) -> Void) {
         let euid = geteuid()
@@ -315,7 +315,7 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
 
     /// The `SleepDisabled` flag and who owns it. Read only, and it needs root
     /// like everything else here: `IOPMCopySystemPowerSettings` is readable by
-    /// anyone, but the marker that says whether Vent set it is not.
+    /// anyone, but the marker that says whether MacTools set it is not.
     func sleepDisabledState(reply: @escaping @Sendable (Data?, String?) -> Void) {
         if let failure = privilegeFailure() {
             reply(nil, failure)
@@ -342,8 +342,8 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
     /// The hold belongs to the connection, not to the helper: the flag is set
     /// while at least one connection that asked for it is alive, and this call
     /// only ever adds or drops the caller's own hold. That is what makes
-    /// `ventctl awake lid off` mean "I am done with it" rather than "clear it
-    /// even though the app is holding it", and what makes a `ventctl` that
+    /// `mactoolsctl awake lid off` mean "I am done with it" rather than "clear it
+    /// even though the app is holding it", and what makes a `mactoolsctl` that
     /// exits take nothing but its own hold with it.
     ///
     /// Clearing is never refused for lack of root in spirit - but it does need

@@ -1,11 +1,11 @@
 import AppKit
 import Foundation
 
-/// Remembers which app the user was in before Vent took the front.
+/// Remembers which app the user was in before MacTools took the front.
 ///
-/// The popover is the reason this exists. Showing it activates Vent, so by the
-/// time the Windows section draws, "the frontmost app" is Vent. The tracker
-/// listens to every activation and keeps the last one that was neither Vent
+/// The popover is the reason this exists. Showing it activates MacTools, so by the
+/// time the Windows section draws, "the frontmost app" is MacTools. The tracker
+/// listens to every activation and keeps the last one that was neither MacTools
 /// nor a background agent, and the popover asks it who that was.
 ///
 /// One notification per app switch, no polling and no timer: the cost of this
@@ -54,7 +54,7 @@ final class FocusTracker {
     // app does.
 
     /// The window the user was last working in, captured through the
-    /// accessibility API. Call it BEFORE anything activates Vent.
+    /// accessibility API. Call it BEFORE anything activates MacTools.
     func captureTarget() -> WindowTarget? {
         // The live frontmost app when it is not us: the most truthful answer,
         // and the one the Windows tab gets while the window has the front.

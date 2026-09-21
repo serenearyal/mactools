@@ -1,3 +1,5 @@
+The product was renamed from Vent to MacTools on 2026-09-21; older notes use the old name.
+
 # Vent - menu bar system monitor, fan control, storage scan, keyboard lock
 
 ## Context

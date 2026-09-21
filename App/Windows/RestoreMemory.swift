@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-/// Where a window was before Vent first moved it.
+/// Where a window was before MacTools first moved it.
 ///
 /// Restore is the undo of this whole feature, so the memory has to survive a
 /// dozen tiles of a dozen windows and must not grow without bound. 32 entries,

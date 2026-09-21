@@ -72,7 +72,7 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
         popover.behavior = sticky ? .applicationDefined : .transient
         // Before anything else, and above all before `NSApp.activate()`: the
         // Windows section acts on the window the user was working in, and from
-        // the moment Vent is frontmost there is no other focused window left
+        // the moment MacTools is frontmost there is no other focused window left
         // to find.
         services.windows.captureTarget()
 

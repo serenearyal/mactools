@@ -60,7 +60,7 @@ struct BacklightView: View {
                     )
                     note(
                         "lock.open",
-                        "Vent changes the Auto setting only when you switch it here. Nothing "
+                        "MacTools changes the Auto setting only when you switch it here. Nothing "
                             + "else in the app touches it."
                     )
                 }

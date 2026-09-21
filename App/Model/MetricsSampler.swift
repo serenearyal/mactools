@@ -178,7 +178,7 @@ actor MetricsSampler {
     /// which do not change; later passes re-read the live keys.
     ///
     /// The mode register is one of them. It is what the firmware is doing right
-    /// now, the helper or `ventctl` can change it from outside this process,
+    /// now, the helper or `mactoolsctl` can change it from outside this process,
     /// and a cached copy would leave the Overview and the popover claiming Auto
     /// over a fan that is forced. The key info is cached, so it costs one
     /// driver round trip per fan.

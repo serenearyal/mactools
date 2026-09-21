@@ -403,7 +403,7 @@ enum DebugCapture {
 
     /// `--label-bench <directory>`: how long one status item label costs.
     ///
-    /// The label is the only thing an idle Vent draws, so the question "is
+    /// The label is the only thing an idle MacTools draws, so the question "is
     /// `ImageRenderer` worth replacing" is answered here rather than guessed.
     /// Every render uses a different value, which is what the menu bar really
     /// does once a second, so no cache can flatter the number.

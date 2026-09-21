@@ -54,7 +54,7 @@ struct LockPermissions: Equatable {
 /// The three permissions are granted in System Settings, outside the app, and
 /// the controller re-reads them on every activation. Without this rule the
 /// refusal stayed on screen for the rest of the session: the user granted what
-/// was missing, came back, and the tab still said Vent could not hold the
+/// was missing, came back, and the tab still said MacTools could not hold the
 /// keyboard.
 enum LockRecovery {
     /// True when a refused lock may be offered again: the state is a failure

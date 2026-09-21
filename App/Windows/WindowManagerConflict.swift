@@ -5,7 +5,7 @@ import Foundation
 ///
 /// The shortcuts of this feature are the shortcuts of every other window
 /// manager, and `RegisterEventHotKey` refuses a chord somebody else owns
-/// without a word. A user who turns Vent's shortcuts on while Rectangle runs
+/// without a word. A user who turns MacTools' shortcuts on while Rectangle runs
 /// would press ⌃⌥← and watch Rectangle answer; naming the app is the whole
 /// difference between a bug report and a choice.
 struct WindowManagerConflict: Identifiable, Equatable {

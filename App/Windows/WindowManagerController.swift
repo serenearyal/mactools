@@ -14,7 +14,7 @@ import WindowKit
 @MainActor
 @Observable
 final class WindowManagerController {
-    /// The window the popover and the tab act on. Captured before Vent takes
+    /// The window the popover and the tab act on. Captured before MacTools takes
     /// the front, so it is the window the user was really working in.
     private(set) var target: WindowTarget?
     /// The last refusal or note, shown under the grid.
@@ -209,7 +209,7 @@ final class WindowManagerController {
     /// Reads the window the user was last working in.
     ///
     /// The popover calls this BEFORE it shows itself: `NSApp.activate()` makes
-    /// Vent the frontmost app, and from that instant there is no other focused
+    /// MacTools the frontmost app, and from that instant there is no other focused
     /// window to find.
     @discardableResult
     func captureTarget() -> WindowTarget? {
@@ -264,7 +264,7 @@ final class WindowManagerController {
         )
     }
 
-    /// The banner appears while another manager runs and Vent is not already
+    /// The banner appears while another manager runs and MacTools is not already
     /// out of its way. On the alternate set with every chord registered there
     /// is no conflict left to report.
     var showsConflictBanner: Bool {
@@ -272,7 +272,7 @@ final class WindowManagerController {
         return choice != .alternate || registrations.values.contains(.taken)
     }
 
-    /// Vent uses Rectangle's own layout while Rectangle is running.
+    /// MacTools uses Rectangle's own layout while Rectangle is running.
     ///
     /// Measured on macOS 26: `RegisterEventHotKey` answers
     /// `eventHotKeyExistsErr` only for a chord the SAME process already holds.

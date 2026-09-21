@@ -31,7 +31,7 @@ extension LidSleepBackend {
 
     func readBack() async -> LidSleepFacts? {
         guard let report = try? await report() else { return nil }
-        return LidSleepFacts(flagSet: report.isSet, isOurs: report.setByVent)
+        return LidSleepFacts(flagSet: report.isSet, isOurs: report.setByMacTools)
     }
 }
 

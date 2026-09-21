@@ -1,4 +1,4 @@
-// Shared build settings for every Vent target.
+// Shared build settings for every MacTools target.
 // Machine-specific overrides go in Config/local.xcconfig, which is gitignored.
 
 DEVELOPMENT_TEAM = M9Q5YCJ5NU

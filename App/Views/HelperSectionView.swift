@@ -68,11 +68,17 @@ struct HelperSectionView: View {
             ("hourglass", .secondary, "Checking…", nil)
         case .notInstalled:
             ("xmark.circle", .secondary, "Not installed", nil)
+        case .supersededOnly:
+            (
+                "exclamationmark.triangle.fill", .orange,
+                "A helper from the old name (Vent) is installed.",
+                "Install replaces it."
+            )
         case .requiresApproval:
             (
                 "exclamationmark.triangle.fill", .orange,
                 "Needs approval in System Settings",
-                "Turn Vent on under Login Items & Extensions, then come back."
+                "Turn MacTools on under Login Items & Extensions, then come back."
             )
         case .running(let version, let uid):
             (

@@ -310,7 +310,7 @@ struct WindowConflictBanner: View {
                 }
                 WrappingRow(spacing: 6) {
                     if controller.choice != .alternate {
-                        Button("Use Vent's alternate set") { controller.useAlternateSet() }
+                        Button("Use MacTools' alternate set") { controller.useAlternateSet() }
                     }
                     Button("Quit \(conflict.name)") { controller.quit(conflict) }
                     if controller.choice != .off {

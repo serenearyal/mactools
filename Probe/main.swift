@@ -3,7 +3,7 @@ import ApplicationServices
 
 /// A window to push around.
 ///
-/// `VentAXProbe` exists so the window mover can be tested against a real
+/// `MacToolsAXProbe` exists so the window mover can be tested against a real
 /// accessibility server without ever touching a window of the user's. It is an
 /// accessory app with one titled window, almost transparent, that never takes
 /// the focus and quits by itself after a minute.
@@ -27,7 +27,7 @@ final class ProbeDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let arguments = CommandLine.arguments
-        let title = value(of: "--title", in: arguments) ?? "Vent AX Probe"
+        let title = value(of: "--title", in: arguments) ?? "MacTools AX Probe"
         let seconds = value(of: "--seconds", in: arguments).flatMap(Double.init) ?? 60
         let frame = value(of: "--frame", in: arguments).flatMap(ProbeDelegate.parse)
             ?? NSRect(x: 120, y: 120, width: 700, height: 520)

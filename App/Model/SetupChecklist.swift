@@ -16,21 +16,21 @@ struct SetupStep: Identifiable {
 
     let id: String
     let title: String
-    /// One line: why Vent asks for this at all.
+    /// One line: why MacTools asks for this at all.
     let reason: String
     let isDone: Bool
     let actionTitle: String?
     let action: Action?
 }
 
-/// The first-run checklist: the four grants Vent needs, with their live state.
+/// The first-run checklist: the four grants MacTools needs, with their live state.
 ///
 /// Every status comes from the source that already owns it - the helper
 /// controller, the lock's permission probe, the Full Disk Access probe and
 /// Service Management - so the card can never disagree with the tab that does
 /// the same job. Nothing is cached beyond the current pass, because the user
 /// grants these in System Settings, outside the app; `observeActivation()`
-/// re-reads them every time Vent comes back to the front.
+/// re-reads them every time MacTools comes back to the front.
 @MainActor
 @Observable
 final class SetupChecklist {
@@ -148,8 +148,8 @@ final class SetupChecklist {
             id: "launchAtLogin",
             title: "Launch at login",
             reason: status == .on
-                ? "Vent starts with the session."
-                : "Vent only measures while it runs, so the menu bar stays empty until you open it by hand.",
+                ? "MacTools starts with the session."
+                : "MacTools only measures while it runs, so the menu bar stays empty until you open it by hand.",
             isDone: status == .on,
             actionTitle: action?.0,
             action: action?.1
@@ -191,7 +191,7 @@ final class SetupChecklist {
         Task { await helper.refresh() }
     }
 
-    /// The user leaves to System Settings and comes back, so the moment Vent
+    /// The user leaves to System Settings and comes back, so the moment MacTools
     /// is active again is the moment every one of these can have changed.
     func observeActivation() {
         guard activationObserver == nil else { return }

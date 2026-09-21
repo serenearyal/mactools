@@ -22,7 +22,7 @@ enum MenuBarLabelStyle: String, CaseIterable, Codable, Identifiable, Sendable {
 /// How much room the status item takes in the menu bar.
 ///
 /// A notched Mac hides everything that does not fit behind the notch, without
-/// a word, and a Vent label with three metrics is wide. Icon only shrinks the
+/// a word, and a MacTools label with three metrics is wide. Icon only shrinks the
 /// item to about 36 pt, against the 95 pt of two two-line metrics.
 ///
 /// Both numbers are measured, not guessed: `--capture` writes the rendered
@@ -114,14 +114,14 @@ struct SettingsData: Codable, Equatable, Sendable {
     /// `.regular` instead of `.accessory`: a Dock icon, and the way back when
     /// the notch hides the status item.
     var showDockIcon: Bool = false
-    /// True once the "Vent keeps running here" tip has been shown. It appears
+    /// True once the "MacTools keeps running here" tip has been shown. It appears
     /// the first time the window is closed and never again.
     var menuBarTipShown: Bool = false
     /// Copy for AI: whether the paste opens with the paragraph that tells the
     /// chat what to do with the table. On by default - the table alone is the
     /// unusual case, and it is one click away.
     var reportIncludesQuestion: Bool = true
-    /// Keep Awake. The state itself is deliberately not here: Vent never comes
+    /// Keep Awake. The state itself is deliberately not here: MacTools never comes
     /// back holding this Mac awake after a relaunch.
     var keepAwakeDuration: KeepAwakeDuration = .indefinite
     var keepAwakeDisplay: Bool = false
@@ -201,13 +201,16 @@ struct SettingsData: Codable, Equatable, Sendable {
 @MainActor
 @Observable
 final class AppSettings {
-    static let defaultsKey = "settings.v1"
+    static let defaultsKey = SettingsMigration.settingsKey
 
     private var data: SettingsData
     @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        // Before the first read, and only ever once: the choices of the build
+        // that was called Vent live in a domain of their own.
+        SettingsMigration.runIfNeeded(into: defaults)
         data = AppSettings.load(from: defaults)
     }
 

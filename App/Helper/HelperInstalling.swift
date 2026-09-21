@@ -35,7 +35,7 @@ enum HelperInstallState: Equatable, Sendable {
 enum HelperBundle {
     /// The helper the build embedded next to the app executable.
     static var bundledHelperURL: URL {
-        Bundle.main.bundleURL.appending(path: "Contents/MacOS/VentHelper")
+        Bundle.main.bundleURL.appending(path: "Contents/MacOS/MacToolsHelper")
     }
 
     /// Version string in the format the helper reports, so the two compare

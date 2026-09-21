@@ -6,7 +6,7 @@ import ObjectiveC
 ///
 /// The framework is private: there is no header, no import and no stable
 /// symbol to link against, so every step is looked up at runtime and every
-/// step may fail on a macOS Vent has never seen. Nothing here traps; a missing
+/// step may fail on a macOS MacTools has never seen. Nothing here traps; a missing
 /// class or a missing method makes the whole feature unavailable, and the
 /// section disappears rather than showing a dead slider.
 ///
@@ -47,7 +47,7 @@ final class KeyboardBacklightClient: BacklightClient {
 
     /// The keys the framework itself names for a keyboard backlight. Read out
     /// of its `__TEXT,__cstring` section, so every one of them exists; which of
-    /// them the notification block actually delivers is undocumented, so Vent
+    /// them the notification block actually delivers is undocumented, so MacTools
     /// asks for all of them and logs what arrives.
     static let notificationKeys = [
         "KeyboardBacklightBrightness",
@@ -140,8 +140,8 @@ final class KeyboardBacklightClient: BacklightClient {
         bool("isAutoBrightnessEnabledForKeyboard:", keyboard)
     }
 
-    /// The one call Vent makes only on an explicit click. The ambient sensor
-    /// is the user's setting, not Vent's to tidy up behind them.
+    /// The one call MacTools makes only on an explicit click. The ambient sensor
+    /// is the user's setting, not MacTools' to tidy up behind them.
     func setAutoEnabled(_ enabled: Bool, _ keyboard: UInt64) -> Bool {
         guard let (object, selector, imp) = implementation("enableAutoBrightness:forKeyboard:") else {
             return false

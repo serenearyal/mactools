@@ -34,7 +34,7 @@ struct KeepAwakeView: View {
                 Text("Sleep")
             } footer: {
                 Text(
-                    "Vent starts every launch with this off. There is no \"turn on at launch\" "
+                    "MacTools starts every launch with this off. There is no \"turn on at launch\" "
                         + "option on purpose: a Mac that silently never sleeps because of a "
                         + "setting made weeks ago is a flat battery waiting to happen."
                 )
@@ -79,9 +79,9 @@ struct KeepAwakeView: View {
                     note(
                         "bolt.circle",
                         keepAwake.blocking.lidSleepIsOurs
-                            ? "Both come off when Vent quits, when Vent is killed, when the timer ends "
+                            ? "Both come off when MacTools quits, when MacTools is killed, when the timer ends "
                                 + "and when the battery guard or a hot Mac says so."
-                            : "Releases itself when Vent quits, and when Vent is killed."
+                            : "Releases itself when MacTools quits, and when MacTools is killed."
                     )
                 }
                 .fixedSize(horizontal: false, vertical: true)
@@ -140,13 +140,13 @@ struct KeepAwakeView: View {
     @ViewBuilder
     private var lidHint: some View {
         if keepAwake.lidClearPending {
-            // Ahead of everything else under this switch: Vent wants the flag
+            // Ahead of everything else under this switch: MacTools wants the flag
             // off, this Mac still will not sleep with the lid shut, and the
             // user is the one carrying it about.
             Label(
                 KeepAwakeController.clearRetryText
                     + ". This Mac still does not sleep with the lid closed. "
-                    + "Vent keeps asking the helper; "
+                    + "MacTools keeps asking the helper; "
                     + "\"\(PowerAssertions.enableSleepCommand)\" ends it at once.",
                 systemImage: "exclamationmark.triangle.fill"
             )
@@ -245,13 +245,13 @@ struct KeepAwakeView: View {
         .help(entry.type)
     }
 
-    /// The one case Vent can only report: somebody ran `pmset disablesleep 1`
+    /// The one case MacTools can only report: somebody ran `pmset disablesleep 1`
     /// as root, and this Mac will not sleep whatever any app asks for.
     private var sleepDisabledRow: some View {
         VStack(alignment: .leading, spacing: Layout.gutter) {
             Label(
                 "Somebody ran \"pmset disablesleep 1\" on this Mac. It never sleeps by itself, "
-                    + "with or without Keep Awake. Vent did not set this one, so Vent will not "
+                    + "with or without Keep Awake. MacTools did not set this one, so MacTools will not "
                     + "undo it: a setting the user made by hand is theirs to reverse.",
                 systemImage: "exclamationmark.triangle"
             )

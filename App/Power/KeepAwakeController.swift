@@ -22,7 +22,7 @@ final class KeepAwakeController {
     private(set) var reason: String?
     /// The power manager said no. Rare, and worth showing when it happens.
     private(set) var failure: String?
-    /// What is keeping this Mac awake, Vent included. Only refreshed while the
+    /// What is keeping this Mac awake, MacTools included. Only refreshed while the
     /// Keep Awake tab is on screen.
     private(set) var assertions: [AssertionEntry] = []
     /// True when this Mac has `SleepDisabled` set, by anybody. Nil until read.
@@ -34,8 +34,8 @@ final class KeepAwakeController {
     /// Why the lid hold is not on, when the user asked for it: no helper, an
     /// old helper, or a flag somebody else set. Nil while all is well.
     private(set) var lidFailure: String?
-    /// True while Vent wants the system-wide flag clear and the read-back still
-    /// says the hold is Vent's. The retry is running, and the UI has to say so:
+    /// True while MacTools wants the system-wide flag clear and the read-back still
+    /// says the hold is MacTools'. The retry is running, and the UI has to say so:
     /// a Mac that cannot sleep with its lid shut cooks in a bag, and "sleeps as
     /// usual" would be a lie at the worst possible moment.
     private(set) var lidClearPending = false
@@ -93,7 +93,7 @@ final class KeepAwakeController {
         self.monitor = monitor
         monitor.start()
         apply(.power(PowerSourceReader.read(), now: .now))
-        // A flag left set by a Vent that was killed is the helper's to clear,
+        // A flag left set by a MacTools run that was killed is the helper's to clear,
         // and it does that when the connection dies and again at its own
         // start. This only makes sure the first thing the user sees is the
         // truth about their Mac.
@@ -143,7 +143,7 @@ final class KeepAwakeController {
     /// What the tab and the popover row say while a clear is being retried.
     static let clearRetryText = "Lid-close sleep is still blocked - retrying"
 
-    /// True when the flag is set and it is not Vent's. Nothing destructive is
+    /// True when the flag is set and it is not MacTools'. Nothing destructive is
     /// ever offered against it.
     var lidSetBySomebodyElse: Bool { blocking.lidSleepBlocked && !blocking.lidSleepIsOurs }
 
@@ -223,13 +223,13 @@ final class KeepAwakeController {
         verify()
         // The tab is the one surface that watches the flag over time, so its
         // five seconds are also when a helper that came back is noticed. Only
-        // while Vent has something at stake: a flag that is somebody else's is
+        // while MacTools has something at stake: a flag that is somebody else's is
         // read once, when the tab appears, and not every five seconds after.
         guard hasLidStake else { return }
         reconcile()
     }
 
-    /// True while there is a hold Vent wants or a hold Vent took. Nothing is
+    /// True while there is a hold MacTools wants or a hold MacTools took. Nothing is
     /// asked of the helper outside it.
     private var hasLidStake: Bool {
         machine.lidRequested || lidIsOurs || lidClearPending
@@ -243,7 +243,7 @@ final class KeepAwakeController {
     /// The local half needs no helper and no root: `IOPMCopyAssertionsByProcess`
     /// for our own pid, and `IOPMCopySystemPowerSettings` for the flag. Who
     /// owns the flag is the helper's answer, and it is only asked for when the
-    /// flag is set or Vent is trying to hold it.
+    /// flag is set or MacTools is trying to hold it.
     private func verify() {
         let held = PowerAssertions.heldBy()
         let flag = PowerAssertions.sleepDisabled() ?? false
@@ -428,7 +428,7 @@ final class KeepAwakeController {
         verify()
         // And the helper's half of it. Every power and thermal push arrives
         // here, so a hold that would not come off is chased on each of them as
-        // well as on its own ladder. Only when Vent has a stake in the flag:
+        // well as on its own ladder. Only when MacTools has a stake in the flag:
         // a flag that belongs to `pmset` must not wake the helper once a
         // minute for an answer nobody acts on.
         if hasLidStake { reconcile() }

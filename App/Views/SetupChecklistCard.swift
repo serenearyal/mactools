@@ -3,7 +3,7 @@ import SwiftUI
 /// The first-run card at the top of the Overview.
 ///
 /// It is a card like the four below it, not a sheet and not a wizard: every
-/// one of these grants is optional, Vent works without them, and a modal that
+/// one of these grants is optional, MacTools works without them, and a modal that
 /// demands four trips to System Settings before the app will show a number
 /// would be a lie about what it needs.
 struct SetupChecklistCard: View {
@@ -41,8 +41,8 @@ struct SetupChecklistCard: View {
 
     private var headline: String {
         checklist.isComplete
-            ? "Everything Vent asks for is granted."
-            : "\(checklist.remaining) of \(checklist.steps.count) still open. Vent runs without them; each one unlocks one feature."
+            ? "Everything MacTools asks for is granted."
+            : "\(checklist.remaining) of \(checklist.steps.count) still open. MacTools runs without them; each one unlocks one feature."
     }
 }
 

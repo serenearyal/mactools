@@ -4,8 +4,8 @@ import HelperProtocol
 
 /// Every logger the app uses, in one place.
 ///
-/// One subsystem, `com.serenearyal.vent`, shared with the privileged helper,
-/// so `log stream --predicate 'subsystem == "com.serenearyal.vent"'` shows both
+/// One subsystem, `com.serenearyal.mactools`, shared with the privileged helper,
+/// so `log stream --predicate 'subsystem == "com.serenearyal.mactools"'` shows both
 /// sides of a call. The categories are the features: `app` for the lifecycle,
 /// `helper` for the daemon and its installers, `fans`, `lock`, `scan` and
 /// `procs`.

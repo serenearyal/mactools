@@ -1,4 +1,4 @@
-name: Vent
+name: MacTools
 
 options:
   bundleIdPrefix: com.serenearyal
@@ -13,8 +13,8 @@ configFiles:
   Release: Config/Shared.xcconfig
 
 packages:
-  VentCore:
-    path: Packages/VentCore
+  MacToolsCore:
+    path: Packages/MacToolsCore
 
 targetTemplates:
   CommandLineTool:
@@ -25,38 +25,38 @@ targetTemplates:
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "3"
+        CURRENT_PROJECT_VERSION: "4"
         SKIP_INSTALL: YES
 
 targets:
-  Vent:
+  MacTools:
     type: application
     platform: macOS
     sources:
       - path: App
         excludes:
-          - "Vent.entitlements"
+          - "MacTools.entitlements"
           - "Resources/LaunchDaemons/**"
       # SMAppService.daemon requires the plist at this exact path, not in Resources.
-      - path: App/Resources/LaunchDaemons/com.serenearyal.vent.helper.plist
+      - path: App/Resources/LaunchDaemons/com.serenearyal.mactools.helper.plist
         buildPhase:
           copyFiles:
             destination: wrapper
             subpath: Contents/Library/LaunchDaemons
     settings:
       base:
-        PRODUCT_NAME: Vent
-        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent
-        CODE_SIGN_ENTITLEMENTS: App/Vent.entitlements
+        PRODUCT_NAME: MacTools
+        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.mactools
+        CODE_SIGN_ENTITLEMENTS: App/MacTools.entitlements
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSUIElement: YES
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
-        INFOPLIST_KEY_CFBundleDisplayName: Vent
+        INFOPLIST_KEY_CFBundleDisplayName: MacTools
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "3"
+        CURRENT_PROJECT_VERSION: "4"
         COMBINE_HIDPI_IMAGES: YES
     dependencies:
-      - package: VentCore
+      - package: MacToolsCore
         products:
           - SMCKit
           - FanControl
@@ -67,7 +67,7 @@ targets:
           - AwakeKit
           - BacklightKit
           - WindowKit
-      - target: VentHelper
+      - target: MacToolsHelper
         embed: true
         link: false
         codeSign: true
@@ -81,18 +81,18 @@ targets:
         inputFiles:
           - $(SRCROOT)/scripts/check_signing.sh
 
-  VentHelper:
+  MacToolsHelper:
     templates:
       - CommandLineTool
     sources:
       - Helper
     settings:
       base:
-        PRODUCT_NAME: VentHelper
-        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.helper
-        INFOPLIST_KEY_CFBundleIdentifier: com.serenearyal.vent.helper
+        PRODUCT_NAME: MacToolsHelper
+        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.mactools.helper
+        INFOPLIST_KEY_CFBundleIdentifier: com.serenearyal.mactools.helper
     dependencies:
-      - package: VentCore
+      - package: MacToolsCore
         products:
           - SMCKit
           - FanControl
@@ -102,35 +102,35 @@ targets:
   # The window the mover is tested against. A bundled app, because an
   # unbundled binary vends no accessibility server at all, and one of ours,
   # because no test may move a window of the user's. It is never embedded in
-  # Vent.app: it sits next to it in the build directory and `make
+  # MacTools.app: it sits next to it in the build directory and `make
   # window-selftest` passes its path.
-  VentAXProbe:
+  MacToolsAXProbe:
     type: application
     platform: macOS
     sources:
       - Probe
     settings:
       base:
-        PRODUCT_NAME: VentAXProbe
-        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.axprobe
+        PRODUCT_NAME: MacToolsAXProbe
+        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.mactools.axprobe
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSUIElement: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Vent AX Probe
+        INFOPLIST_KEY_CFBundleDisplayName: MacTools AX Probe
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "3"
+        CURRENT_PROJECT_VERSION: "4"
         SKIP_INSTALL: YES
 
-  ventctl:
+  mactoolsctl:
     templates:
       - CommandLineTool
     sources:
-      - ventctl
+      - mactoolsctl
       # The XPC client is the app's, so the CLI proves the same code path.
       - App/Helper/HelperConnection.swift
       - App/Model/AppLog.swift
       # The same mapping, the same sysctl reader and the same two system
-      # clients the app uses, so `ventctl report`, `ventctl awake` and
-      # `ventctl backlight` prove the app's own paths rather than a copy.
+      # clients the app uses, so `mactoolsctl report`, `mactoolsctl awake` and
+      # `mactoolsctl backlight` prove the app's own paths rather than a copy.
       - App/Model/ReportBuilder.swift
       - App/Model/SystemContextParser.swift
       - App/Model/SystemContextReader.swift
@@ -139,15 +139,15 @@ targets:
       - App/Backlight/BacklightClient.swift
       - App/Backlight/BacklightEngine.swift
       - App/Backlight/KeyboardBacklightClient.swift
-      # The accessibility reads of `ventctl window list` are the app's, so the
+      # The accessibility reads of `mactoolsctl window list` are the app's, so the
       # CLI cannot drift from what the window manager sees.
       - App/Windows/AXBridge.swift
     settings:
       base:
-        PRODUCT_NAME: ventctl
-        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.ventctl
+        PRODUCT_NAME: mactoolsctl
+        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.mactools.mactoolsctl
     dependencies:
-      - package: VentCore
+      - package: MacToolsCore
         products:
           - SMCKit
           - FanControl
@@ -158,11 +158,11 @@ targets:
           - AwakeKit
           - BacklightKit
 
-  VentIntegrationTests:
+  MacToolsIntegrationTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - Tests/VentIntegrationTests
+      - Tests/MacToolsIntegrationTests
       # The helper service, without its main.swift, so the XPC round trip can
       # be tested over an anonymous listener with no daemon installed. The fan
       # coordinator comes with it, driven by a fake instead of the SMC.
@@ -182,6 +182,10 @@ targets:
       # checked without registering anything with launchd.
       - App/Model/LaunchAtLogin.swift
       - App/Model/AppLog.swift
+      # The one-time copy of the settings out of the defaults domain of the
+      # old name. Pure rules over a two-method store protocol, so the tests
+      # drive it with two dictionaries and touch no real preferences.
+      - App/Model/SettingsMigration.swift
       # What the window, the popover and the menu bar ask the stores to
       # sample. Pure rules over the request types next to them. `AppSettings`
       # itself stays out: an `@Observable` class in this bundle makes the
@@ -226,10 +230,10 @@ targets:
       - App/Windows/WindowSettingsData.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.vent.integration-tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.mactools.integration-tests
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
-      - package: VentCore
+      - package: MacToolsCore
         products:
           - SMCKit
           - FanControl
@@ -242,27 +246,27 @@ targets:
           - WindowKit
 
 schemes:
-  Vent:
+  MacTools:
     build:
       targets:
-        Vent: all
-        ventctl: all
-        VentAXProbe: all
-        VentIntegrationTests: [test]
+        MacTools: all
+        mactoolsctl: all
+        MacToolsAXProbe: all
+        MacToolsIntegrationTests: [test]
     run:
       config: Debug
-      executable: Vent
+      executable: MacTools
     test:
       config: Debug
       targets:
-        - VentIntegrationTests
+        - MacToolsIntegrationTests
     archive:
       config: Release
 
-  ventctl:
+  mactoolsctl:
     build:
       targets:
-        ventctl: all
+        mactoolsctl: all
     run:
       config: Debug
-      executable: ventctl
+      executable: mactoolsctl

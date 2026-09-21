@@ -156,7 +156,7 @@ final class BacklightEngine {
         reading.level = value
     }
 
-    /// The Auto chip and the "Turn off Auto" button, and nothing else. Vent
+    /// The Auto chip and the "Turn off Auto" button, and nothing else. MacTools
     /// never changes the ambient setting on its own.
     func setAuto(_ enabled: Bool) {
         guard let keyboard else { return }
@@ -164,7 +164,7 @@ final class BacklightEngine {
         reading.isAuto = client.isAutoEnabled(keyboard)
     }
 
-    /// The `--backlight-probe` line, and the `ventctl backlight get` output.
+    /// The `--backlight-probe` line, and the `mactoolsctl backlight get` output.
     var summary: String {
         guard let keyboard else {
             return "unavailable: \(availability.reason?.rawValue ?? "unknown")"

@@ -16,6 +16,15 @@ final class LegacyHelperInstaller: HelperInstalling {
 
     private let log = AppLog.helper
 
+    /// True while anything of the helper from before the rename is still on
+    /// disk. It is not `state()`: that generation answers no call of this app,
+    /// so it is never "installed" - it is rubbish to clear, and both the
+    /// install and the uninstall clear it.
+    var hasSupersededInstall: Bool {
+        let manager = FileManager.default
+        return HelperConstants.Superseded.paths.contains { manager.fileExists(atPath: $0) }
+    }
+
     func state() -> HelperInstallState {
         let manager = FileManager.default
         let binary = manager.fileExists(atPath: HelperConstants.legacyHelperPath)
@@ -41,14 +50,14 @@ final class LegacyHelperInstaller: HelperInstalling {
         log.notice("legacy install from \(source, privacy: .public)")
         try await runAsAdministrator(
             Self.installScript(source: source),
-            reason: "install the Vent privileged helper"
+            reason: "install the MacTools privileged helper"
         )
     }
 
     func uninstall() async throws {
         try await runAsAdministrator(
             Self.uninstallScript(),
-            reason: "remove the Vent privileged helper"
+            reason: "remove the MacTools privileged helper"
         )
     }
 
@@ -62,7 +71,7 @@ final class LegacyHelperInstaller: HelperInstalling {
         let label = HelperConstants.machServiceName
         let plist = HelperConstants.legacyPlistPath
         let binary = HelperConstants.legacyHelperPath
-        return [
+        return (supersededCleanup() + [
             "/bin/mkdir -p /Library/PrivilegedHelperTools",
             "/bin/cp -f '\(source)' '\(binary)'",
             "/usr/sbin/chown root:wheel '\(binary)'",
@@ -72,16 +81,36 @@ final class LegacyHelperInstaller: HelperInstalling {
             "/bin/chmod 644 '\(plist)'",
             "{ /bin/launchctl bootout system/\(label) || true; }",
             "/bin/launchctl bootstrap system '\(plist)'",
-        ].joined(separator: " && ")
+        ]).joined(separator: " && ")
     }
 
     static func uninstallScript() -> String {
         let label = HelperConstants.machServiceName
-        return [
+        return (supersededCleanup() + [
             "{ /bin/launchctl bootout system/\(label) || true; }",
             "/bin/rm -f '\(HelperConstants.legacyPlistPath)'",
             "/bin/rm -f '\(HelperConstants.legacyHelperPath)'",
-        ].joined(separator: " && ")
+        ]).joined(separator: " && ")
+    }
+
+    /// The daemon the product left behind when it was called Vent, removed in
+    /// the same prompt as the install that replaces it.
+    ///
+    /// It is a root job with `RunAtLoad`, so nothing else ever stops it: the
+    /// rename changed the label, the app now talks to a different mach service,
+    /// and the old daemon would keep starting at every boot for nobody.
+    ///
+    /// Order matters. The bootout first, so the old helper gets its SIGTERM and
+    /// clears the system sleep setting it may be holding; then the plist, the
+    /// binary and last the marker it writes when it does hold that setting.
+    ///
+    /// Every step is best effort. A Mac that never ran the old name has none of
+    /// these paths, `rm -f` is silent about a file that is not there, and a
+    /// bootout of a job launchd does not know exits non-zero; none of that may
+    /// stop the install that follows.
+    static func supersededCleanup() -> [String] {
+        ["{ /bin/launchctl bootout system/\(HelperConstants.Superseded.machServiceName) || true; }"]
+            + HelperConstants.Superseded.paths.map { "{ /bin/rm -f '\($0)' || true; }" }
     }
 
     /// The daemon plist for a job outside an app bundle: `Program`, not
@@ -91,7 +120,7 @@ final class LegacyHelperInstaller: HelperInstalling {
     /// `App/Resources/LaunchDaemons`: the helper clears a `SleepDisabled` flag
     /// a previous run left behind at its own start, and that flag survives a
     /// reboot, so the recovery has to run at boot rather than when somebody
-    /// first opens Vent. The helper waits on its listener and polls nothing,
+    /// first opens MacTools. The helper waits on its listener and polls nothing,
     /// so an idle Mac pays nothing for it.
     static func daemonPlist(programPath: String) -> String {
         """
@@ -126,7 +155,7 @@ final class LegacyHelperInstaller: HelperInstalling {
     static func appleScript(for command: String, reason: String) -> String {
         """
         do shell script "\(escapedForAppleScript(command))" \
-        with prompt "Vent needs your password to \(reason)." \
+        with prompt "MacTools needs your password to \(reason)." \
         with administrator privileges
         """
     }

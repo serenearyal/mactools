@@ -12,7 +12,7 @@ set -euo pipefail
 
 allowed="${CODE_SIGNING_ALLOWED:-YES}"
 if [ "${allowed}" != "YES" ]; then
-	echo "error: code signing is disabled (CODE_SIGNING_ALLOWED=${allowed}). Vent must be signed with a real identity." >&2
+	echo "error: code signing is disabled (CODE_SIGNING_ALLOWED=${allowed}). MacTools must be signed with a real identity." >&2
 	exit 1
 fi
 

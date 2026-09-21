@@ -25,7 +25,7 @@ enum HelperConnectionError: Error, LocalizedError, Equatable, Sendable {
 
 /// The client side of the XPC link to the privileged helper.
 ///
-/// An actor, not a `@MainActor` class, so `ventctl` can use the same code as
+/// An actor, not a `@MainActor` class, so `mactoolsctl` can use the same code as
 /// the app. The connection is made on first use and thrown away on
 /// invalidation, so a helper that is installed, killed or restarted while the
 /// app runs needs no restart of the app: the next call reconnects.
@@ -111,7 +111,7 @@ actor HelperConnection {
 
     // MARK: - Sleep
 
-    /// The system-wide `SleepDisabled` flag and whether Vent is the one
+    /// The system-wide `SleepDisabled` flag and whether MacTools is the one
     /// holding it. Needs the helper: the marker is root-owned.
     func sleepDisabledState() async throws(HelperConnectionError) -> SleepDisabledReport {
         let data: Data = try await call { proxy, done in
@@ -171,7 +171,7 @@ actor HelperConnection {
     /// error and the timeout. `NSXPCConnection` may call both the reply block
     /// and the error handler, so the result goes through a one-shot box.
     private func call<T: Sendable>(
-        _ body: (any VentHelperProtocol, @escaping @Sendable (Result<T, HelperConnectionError>) -> Void) -> Void
+        _ body: (any MacToolsHelperProtocol, @escaping @Sendable (Result<T, HelperConnectionError>) -> Void) -> Void
     ) async throws(HelperConnectionError) -> T {
         let connection = activeConnection()
         let outcome: Result<T, HelperConnectionError> = await withCheckedContinuation { continuation in
@@ -179,7 +179,7 @@ actor HelperConnection {
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
                 box.deliver(.failure(.unavailable(Self.message(for: error))))
             }
-            guard let proxy = proxy as? any VentHelperProtocol else {
+            guard let proxy = proxy as? any MacToolsHelperProtocol else {
                 box.deliver(.failure(.unavailable("the helper connection exports no usable proxy")))
                 return
             }
@@ -201,7 +201,7 @@ actor HelperConnection {
     /// The same, for the calls whose whole reply is "why not", where nil means
     /// it worked.
     private func callVoid(
-        _ body: (any VentHelperProtocol, @escaping @Sendable (String?) -> Void) -> Void
+        _ body: (any MacToolsHelperProtocol, @escaping @Sendable (String?) -> Void) -> Void
     ) async throws(HelperConnectionError) {
         _ = try await call { (proxy, done: @escaping @Sendable (Result<Bool, HelperConnectionError>) -> Void) in
             body(proxy) { reason in
@@ -217,7 +217,7 @@ actor HelperConnection {
             machServiceName: HelperConstants.machServiceName,
             options: .privileged
         )
-        connection.remoteObjectInterface = NSXPCInterface(with: VentHelperProtocol.self)
+        connection.remoteObjectInterface = NSXPCInterface(with: MacToolsHelperProtocol.self)
         // Refuse to talk to anything but our own signed helper. The string is
         // unit tested against SecRequirementCreateWithString, because a
         // malformed one raises an Objective-C exception right here.

@@ -63,14 +63,14 @@ struct KeyboardLockView: View {
             Section {
                 permissionRow(
                     title: "Accessibility",
-                    detail: "Lets Vent hold the keys.",
+                    detail: "Lets MacTools hold the keys.",
                     granted: lock.permissions.accessibility,
                     grant: { lock.requestAccessibility() },
                     settings: { lock.openAccessibilitySettings() }
                 )
                 permissionRow(
                     title: "Input Monitoring",
-                    detail: "Lets Vent see the keys it holds.",
+                    detail: "Lets MacTools see the keys it holds.",
                     granted: lock.permissions.inputMonitoring,
                     grant: { lock.requestInputMonitoring() },
                     settings: { lock.openInputMonitoringSettings() }
@@ -86,7 +86,7 @@ struct KeyboardLockView: View {
             } header: {
                 Text("Permissions")
             } footer: {
-                Text("macOS asks for both once. After a grant, quit and open Vent again if the row stays red.")
+                Text("macOS asks for both once. After a grant, quit and open MacTools again if the row stays red.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

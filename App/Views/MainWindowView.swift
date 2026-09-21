@@ -41,7 +41,7 @@ struct MainWindowView: View {
                 // An accessory app has no menu bar of its own, so Cmd-W would
                 // do nothing at all without this.
                 .keyboardShortcut("w", modifiers: .command)
-                .help("Close the window. Vent keeps running in the menu bar.")
+                .help("Close the window. MacTools keeps running in the menu bar.")
             }
         }
     }

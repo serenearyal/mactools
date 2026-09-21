@@ -1,12 +1,12 @@
 .PHONY: gen build test install run release clean window-selftest
 
-PROJECT      := Vent.xcodeproj
-SCHEME       := Vent
+PROJECT      := MacTools.xcodeproj
+SCHEME       := MacTools
 CONFIG       := Debug
 DERIVED      := $(CURDIR)/build
 PRODUCTS     := $(DERIVED)/Build/Products/$(CONFIG)
-APP          := $(PRODUCTS)/Vent.app
-INSTALLED    := /Applications/Vent.app
+APP          := $(PRODUCTS)/MacTools.app
+INSTALLED    := /Applications/MacTools.app
 DESTINATION  := platform=macOS,arch=arm64
 
 XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG) \
@@ -22,7 +22,7 @@ build: $(PROJECT)
 	$(XCODEBUILD) build
 
 test: $(PROJECT)
-	swift test --package-path Packages/VentCore
+	swift test --package-path Packages/MacToolsCore
 	$(XCODEBUILD) test
 
 install: build
@@ -34,12 +34,12 @@ install: build
 	@# An instance that was already running keeps the old binary in memory, and
 	@# `open` on a running app starts nothing. Restart it AFTER the copy, in
 	@# the background, so the user is never left on the build before this one.
-	@pid=$$(pgrep -f "^$(INSTALLED)/Contents/MacOS/Vent" | head -1); \
+	@pid=$$(pgrep -f "^$(INSTALLED)/Contents/MacOS/MacTools" | head -1); \
 	if [ -n "$$pid" ]; then \
 		kill $$pid; \
 		while kill -0 $$pid 2>/dev/null; do /bin/sleep 0.2; done; \
 		open -g "$(INSTALLED)"; \
-		echo "restarted the running Vent in the background"; \
+		echo "restarted the running MacTools in the background"; \
 	fi
 
 # The shipping build: optimised, hardened runtime, signed with the same Apple
@@ -48,14 +48,14 @@ install: build
 # other Mac; `make install CONFIG=Release` is how it is used here.
 release:
 	$(MAKE) build CONFIG=Release
-	@test -d "$(DERIVED)/Build/Products/Release/Vent.app" \
+	@test -d "$(DERIVED)/Build/Products/Release/MacTools.app" \
 		|| { echo "error: the Release app is missing"; exit 1; }
-	codesign --verify --strict --verbose=2 "$(DERIVED)/Build/Products/Release/Vent.app"
+	codesign --verify --strict --verbose=2 "$(DERIVED)/Build/Products/Release/MacTools.app"
 	codesign --verify --strict --verbose=2 \
-		"$(DERIVED)/Build/Products/Release/Vent.app/Contents/MacOS/VentHelper"
+		"$(DERIVED)/Build/Products/Release/MacTools.app/Contents/MacOS/MacToolsHelper"
 	@echo ""
-	@echo "release app: $(DERIVED)/Build/Products/Release/Vent.app"
-	@du -sh "$(DERIVED)/Build/Products/Release/Vent.app" | cut -f1 | xargs echo "size:      "
+	@echo "release app: $(DERIVED)/Build/Products/Release/MacTools.app"
+	@du -sh "$(DERIVED)/Build/Products/Release/MacTools.app" | cut -f1 | xargs echo "size:      "
 	@echo "not notarized: this machine has no Developer ID certificate."
 
 run: install
@@ -66,9 +66,9 @@ run: install
 # It runs the app built here, never the installed one, and it drives one probe
 # window of ours: no window of the user's is touched, and nothing takes the
 # front. Accessibility is granted by code identity, so this build inherits the
-# grant of com.serenearyal.vent.
+# grant of com.serenearyal.mactools.
 SELFTEST_DIR := $(DERIVED)/selftest
-PROBE        := $(PRODUCTS)/VentAXProbe.app
+PROBE        := $(PRODUCTS)/MacToolsAXProbe.app
 
 window-selftest: build
 	@test -d "$(PROBE)" || { echo "error: $(PROBE) is missing"; exit 1; }
@@ -86,4 +86,4 @@ window-selftest: build
 	@grep -q "WINDOW SELFTEST: PASS" "$(SELFTEST_DIR)/window-selftest.txt"
 
 clean:
-	rm -rf $(DERIVED) Packages/VentCore/.build
+	rm -rf $(DERIVED) Packages/MacToolsCore/.build

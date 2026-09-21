@@ -91,7 +91,7 @@ struct MenuBarPopoverView: View {
             Image(systemName: "fan.fill")
                 .foregroundStyle(.tint)
                 .imageScale(.medium)
-            Text("Vent")
+            Text("MacTools")
                 .font(.headline)
             // The badge slot. It holds its height either way, so the header
             // never changes when a state appears in it.
@@ -99,13 +99,13 @@ struct MenuBarPopoverView: View {
                 PopoverBadgeView(badge: badge)
             }
             Spacer(minLength: PopoverLayout.rowSpacing)
-            PopoverIconButton(symbolName: "macwindow", help: "Open Vent") {
+            PopoverIconButton(symbolName: "macwindow", help: "Open MacTools") {
                 open(.overview)
             }
             PopoverIconButton(symbolName: "gearshape", help: "Settings") {
                 open(.settings)
             }
-            PopoverIconButton(symbolName: "power", help: "Quit Vent", action: actions.quit)
+            PopoverIconButton(symbolName: "power", help: "Quit MacTools", action: actions.quit)
         }
         .frame(height: 44)
         .padding(.horizontal, PopoverLayout.padding)

@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// The warning above every tab when Vent is not running from `/Applications`.
+/// The warning above every tab when MacTools is not running from `/Applications`.
 ///
 /// The launch daemon is registered with the path of the bundle that registered
 /// it, and every TCC grant - Accessibility, Input Monitoring, Full Disk Access
 /// - is bound to the same path. A copy that runs from the Downloads folder
 /// therefore collects its own set of both and loses them again the moment it
-/// is moved. Vent says so and changes nothing: moving an app behind the user's
+/// is moved. MacTools says so and changes nothing: moving an app behind the user's
 /// back is worse than a line of text.
 struct LaunchLocationBanner: View {
-    /// `/Applications/Vent.app`, where `make install` puts it. A copy in
+    /// `/Applications/MacTools.app`, where `make install` puts it. A copy in
     /// `~/Applications` is a different path to launchd and to TCC, so it
     /// counts as misplaced too.
     static var isInPlace: Bool {
@@ -23,7 +23,7 @@ struct LaunchLocationBanner: View {
                     .foregroundStyle(.orange)
                     .frame(width: 18, alignment: .center)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Vent is not running from /Applications")
+                    Text("MacTools is not running from /Applications")
                         .font(.callout.weight(.medium))
                         .lineLimit(1)
                     // One line, and the path is not in it: a bundle path is

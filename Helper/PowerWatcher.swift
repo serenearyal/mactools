@@ -31,7 +31,7 @@ final class PowerWatcher: Sendable {
     private let handler = Mutex<(@Sendable (Event) -> Void)?>(nil)
     /// A dispatch queue and not a run loop source: the helper parks its main
     /// thread in `dispatchMain()`, where no CFRunLoop ever runs.
-    private let queue = DispatchQueue(label: "com.serenearyal.vent.helper.power")
+    private let queue = DispatchQueue(label: "com.serenearyal.mactools.helper.power")
 
     func start(_ onEvent: @escaping @Sendable (Event) -> Void) {
         handler.withLock { $0 = onEvent }

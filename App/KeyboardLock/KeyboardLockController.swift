@@ -47,7 +47,7 @@ final class KeyboardLockController {
     @ObservationIgnored private var runner: EventTapRunner?
     @ObservationIgnored private var timeout: DispatchSourceTimer?
     @ObservationIgnored private let timeoutQueue = DispatchQueue(
-        label: "com.serenearyal.vent.lock.timeout"
+        label: "com.serenearyal.mactools.lock.timeout"
     )
     /// Kept for the life of the app: the controller is owned by
     /// `AppServices.shared`, and an observer that outlives a lock is the
@@ -130,13 +130,13 @@ final class KeyboardLockController {
             return
         }
         guard permissions.accessibility else {
-            fail("Vent needs Accessibility permission before it can hold the keyboard.")
+            fail("MacTools needs Accessibility permission before it can hold the keyboard.")
             requestAccessibility()
             showOnboarding()
             return
         }
         guard permissions.inputMonitoring else {
-            fail("Vent needs Input Monitoring permission before it can hold the keyboard.")
+            fail("MacTools needs Input Monitoring permission before it can hold the keyboard.")
             requestInputMonitoring()
             showOnboarding()
             return

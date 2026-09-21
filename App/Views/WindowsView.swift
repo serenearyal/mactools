@@ -12,7 +12,7 @@ struct WindowsView: View {
 
     var body: some View {
         WindowsContent(controller: controller, settings: settings, scrolls: true)
-            // The window the tab acts on is whatever was in front before Vent
+            // The window the tab acts on is whatever was in front before MacTools
             // took it, so it is read when the tab appears and never polled.
             .onAppear { controller.captureTarget() }
     }
@@ -146,7 +146,7 @@ struct WindowsContent: View {
             Toggle(isOn: workaroundBinding) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Work around the enhanced interface offset")
-                    Text("Some apps report their window in a space of their own. Vent switches the flag off while it writes, and never while VoiceOver runs.")
+                    Text("Some apps report their window in a space of their own. MacTools switches the flag off while it writes, and never while VoiceOver runs.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -203,7 +203,7 @@ struct WindowsContent: View {
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Accessibility")
-                Text("Lets Vent move the windows of other apps.")
+                Text("Lets MacTools move the windows of other apps.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

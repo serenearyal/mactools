@@ -10,7 +10,7 @@ import SwiftUI
 /// If the status item cannot be seen - hidden by the user, or pushed behind
 /// the notch by a full menu bar - the tip is not shown at all and nothing is
 /// turned on. A tip that points at an icon the user cannot find is worse than
-/// no tip, and the app is never unreachable: opening Vent again from Spotlight
+/// no tip, and the app is never unreachable: opening MacTools again from Spotlight
 /// or the Finder brings the window back (`applicationShouldHandleReopen`). The
 /// flag is left unset in that case, so the tip still arrives on the first
 /// close where the item is visible.
@@ -104,7 +104,7 @@ struct MenuBarTipView: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: "menubar.arrow.up.rectangle")
                     .foregroundStyle(.tint)
-                Text("Vent keeps running here.\nClick the icon to open it.")
+                Text("MacTools keeps running here.\nClick the icon to open it.")
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 8) {

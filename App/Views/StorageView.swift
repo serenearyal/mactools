@@ -386,7 +386,7 @@ private struct FullDiskAccessBanner: View {
             // that the table squeezes grows without bound, and its height
             // then pushes the whole window content off the top.
             VStack(alignment: .leading, spacing: 1) {
-                Text("Vent does not have Full Disk Access")
+                Text("MacTools does not have Full Disk Access")
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
                 Text("The scan still runs; it skips protected folders and counts them as unreadable.")

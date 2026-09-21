@@ -34,7 +34,7 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecked 
     ) -> Bool {
         let pid = connection.processIdentifier
         let uid = connection.effectiveUserIdentifier
-        connection.exportedInterface = NSXPCInterface(with: VentHelperProtocol.self)
+        connection.exportedInterface = NSXPCInterface(with: MacToolsHelperProtocol.self)
         connection.exportedObject = service
 
         // Restore guarantee 1: the fans and the system sleep setting belong to

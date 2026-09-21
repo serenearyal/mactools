@@ -145,7 +145,7 @@ final class StatusItemController: NSObject {
 
     private lazy var contextMenu: NSMenu = {
         let menu = NSMenu()
-        menu.addItem(item(title: "Open Vent", action: #selector(openWindow)))
+        menu.addItem(item(title: "Open MacTools", action: #selector(openWindow)))
         menu.addItem(.separator())
         let window = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
         window.submenu = windowMenu
@@ -159,7 +159,7 @@ final class StatusItemController: NSObject {
         menu.addItem(.separator())
         menu.addItem(item(title: "Settings...", action: #selector(openSettings)))
         menu.addItem(.separator())
-        menu.addItem(item(title: "Quit Vent", action: #selector(quit), key: "q"))
+        menu.addItem(item(title: "Quit MacTools", action: #selector(quit), key: "q"))
         return menu
     }()
 
@@ -187,7 +187,7 @@ final class StatusItemController: NSObject {
             // reopen what the user just dismissed.
             button.sendAction(on: [.leftMouseDown, .rightMouseUp])
             button.imagePosition = .imageOnly
-            button.setAccessibilityLabel("Vent system metrics")
+            button.setAccessibilityLabel("MacTools system metrics")
             button.wantsLayer = true
             ledLayer.zPosition = 1
             button.layer?.addSublayer(ledLayer)
@@ -407,7 +407,7 @@ final class StatusItemController: NSObject {
         CATransaction.commit()
         if led != lastLED {
             lastLED = led
-            button.setAccessibilityLabel("Vent system metrics, \(led.meaning)")
+            button.setAccessibilityLabel("MacTools system metrics, \(led.meaning)")
         }
     }
 

@@ -35,7 +35,7 @@ final class EventTapRunner: @unchecked Sendable {
     private var stopping = false
     private var chord = UnlockChord()
 
-    private let watchdogQueue = DispatchQueue(label: "com.serenearyal.vent.lock.watchdog")
+    private let watchdogQueue = DispatchQueue(label: "com.serenearyal.mactools.lock.watchdog")
     private var watchdog: DispatchSourceTimer?
     private static let watchdogInterval: TimeInterval = 2
 
@@ -65,7 +65,7 @@ final class EventTapRunner: @unchecked Sendable {
                 CFRunLoopRunInMode(.defaultMode, 60, false)
             }
         }
-        thread.name = "com.serenearyal.vent.lock"
+        thread.name = "com.serenearyal.mactools.lock"
         // Above the default so a loaded machine still answers the tap in time,
         // below the real-time bands the system uses for audio.
         thread.qualityOfService = .userInteractive

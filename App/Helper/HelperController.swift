@@ -7,6 +7,10 @@ import HelperProtocol
 enum HelperState: Equatable, Sendable {
     case unknown
     case notInstalled
+    /// No helper of this app, but the root daemon from before the rename is
+    /// still installed. It answers nothing this app asks, and Install replaces
+    /// it in one prompt.
+    case supersededOnly
     /// Registered with launchd and waiting for the switch in System Settings.
     case requiresApproval
     case running(version: String, uid: UInt32)
@@ -87,7 +91,9 @@ final class HelperController {
         installedBy = nil
         state = switch (smStatus, legacyStatus) {
         case (_, .stale(let reason)), (.stale(let reason), _): .failed(reason)
-        default: .notInstalled
+        // Nothing of this app is installed. The daemon of the old name may
+        // still be, and "not installed" would be a poor answer to that.
+        default: legacy.hasSupersededInstall ? .supersededOnly : .notInstalled
         }
     }
 
@@ -171,7 +177,9 @@ final class HelperController {
                 failures.append(error.localizedDescription)
             }
         }
-        if legacy.state() != .notInstalled {
+        // The old name's daemon goes with it: one script removes both
+        // generations, so an uninstall leaves nothing of either behind.
+        if legacy.state() != .notInstalled || legacy.hasSupersededInstall {
             do { try await legacy.uninstall() } catch HelperInstallError.cancelled {
                 await refresh()
                 return

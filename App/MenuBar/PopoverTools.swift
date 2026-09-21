@@ -67,8 +67,8 @@ struct PopoverTools: View {
                 AwakeLEDLegend(current: keepAwake.blocking.led)
             }
             // The one thing in this panel that is worth a second line of its
-            // own: Vent wants the system-wide flag off, the read-back says it
-            // is still Vent's, and a closed Mac that cannot sleep gets hot.
+            // own: MacTools wants the system-wide flag off, the read-back says it
+            // is still MacTools', and a closed Mac that cannot sleep gets hot.
             if keepAwake.lidClearPending {
                 hint {
                     PopoverHint(

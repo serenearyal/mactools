@@ -1,7 +1,7 @@
 import BacklightKit
 import Foundation
 
-/// The handful of calls Vent makes into the keyboard backlight.
+/// The handful of calls MacTools makes into the keyboard backlight.
 ///
 /// A protocol, so the rules above it can be tested against a fake: a test that
 /// dims the real keyboard of whoever is running it is not a test.

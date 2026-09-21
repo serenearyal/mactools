@@ -123,7 +123,7 @@ struct AssertionEntry: Identifiable, Equatable, Sendable {
 /// What this process is holding right now, as the power manager sees it.
 ///
 /// Read back, never remembered: the `IOPMAssertionID` returned by a create is
-/// only proof that a call succeeded, and a Vent that was killed, app-napped or
+/// only proof that a call succeeded, and a MacTools run that was killed, app-napped or
 /// restarted has ids that mean nothing. Every "on" in the UI comes from this.
 struct HeldAssertions: Equatable, Sendable {
     var idleSystemSleep = false
@@ -196,7 +196,7 @@ enum PowerAssertions {
     }
 
     /// True when this Mac has `SleepDisabled` set: either somebody ran
-    /// `sudo pmset disablesleep 1`, or Vent's own privileged helper set it for
+    /// `sudo pmset disablesleep 1`, or MacTools' own privileged helper set it for
     /// "Stay awake with the lid closed".
     ///
     /// This is not an assertion: it is a system setting that stops the Mac
@@ -204,7 +204,7 @@ enum PowerAssertions {
     /// flag is on, never who set it - the helper's root-owned marker answers
     /// that, over XPC, in `LidSleepBackend`. The tab needs both: a Keep Awake
     /// switch that did not say the Mac is already held awake would be
-    /// dishonest, and one that blamed `pmset` for Vent's own flag would be
+    /// dishonest, and one that blamed `pmset` for MacTools' own flag would be
     /// worse.
     ///
     /// The read itself is `SystemSleepFlag.read()`, shared with the helper so
@@ -213,9 +213,9 @@ enum PowerAssertions {
         SystemSleepFlag.value()
     }
 
-    /// What the user would type to undo a flag that is not Vent's. Shown as
-    /// selectable text with a copy button, never run by Vent: it needs root,
+    /// What the user would type to undo a flag that is not MacTools'. Shown as
+    /// selectable text with a copy button, never run by MacTools: it needs root,
     /// and somebody else's decision to keep this Mac awake is theirs to
-    /// reverse. Vent's own flag comes off with the switch that set it.
+    /// reverse. MacTools' own flag comes off with the switch that set it.
     static let enableSleepCommand = "sudo pmset disablesleep 0"
 }

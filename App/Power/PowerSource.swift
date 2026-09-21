@@ -14,7 +14,7 @@ struct PowerStatus: Equatable, Sendable {
     var percent: Int?
     /// False on a desk Mac and on a laptop that is plugged in.
     var onBattery = false
-    /// The user asked the system for battery life over everything else. Vent
+    /// The user asked the system for battery life over everything else. MacTools
     /// takes them at their word and samples four times slower.
     var lowPowerMode = false
     var thermal: ProcessInfo.ThermalState = .nominal

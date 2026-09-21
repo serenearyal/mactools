@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let services = AppServices.shared
         AppLog.app.notice(
             """
-            Vent \(HelperBundle.version, privacy: .public) started from \
+            MacTools \(HelperBundle.version, privacy: .public) started from \
             \(Bundle.main.bundlePath, privacy: .private)
             """
         )
@@ -66,7 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Dock icon
 
-    /// `.regular` gives Vent a Dock icon, an app switcher entry and a menu
+    /// `.regular` gives MacTools a Dock icon, an app switcher entry and a menu
     /// bar; `.accessory` is the menu bar app it is by default.
     ///
     /// Live: the toggle in Settings lands here. Switching to `.regular` needs
@@ -144,7 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// `open -a Vent --args --show-window [--tab sensors]`, so a screenshot
+    /// `open -a MacTools --args --show-window [--tab sensors]`, so a screenshot
     /// run needs no click.
     private func applyLaunchArguments(services: AppServices) {
         let arguments = CommandLine.arguments

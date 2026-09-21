@@ -3,7 +3,7 @@ import ServiceManagement
 
 import HelperProtocol
 
-/// Registers `Contents/Library/LaunchDaemons/com.serenearyal.vent.helper.plist`
+/// Registers `Contents/Library/LaunchDaemons/com.serenearyal.mactools.helper.plist`
 /// with launchd through Service Management.
 ///
 /// This path asks for no password. macOS registers the daemon disabled and the

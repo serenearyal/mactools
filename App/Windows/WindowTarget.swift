@@ -6,7 +6,7 @@ import WindowKit
 /// One window of another app, as it was when we looked at it.
 ///
 /// The popover has to take this picture BEFORE it opens: showing the popover
-/// activates Vent, and from that moment the frontmost app is Vent itself and
+/// activates MacTools, and from that moment the frontmost app is MacTools itself and
 /// the window the user was working in is no longer focused anywhere.
 ///
 /// The element is kept alongside the copied values. The values are for the UI,
@@ -62,7 +62,7 @@ struct WindowTarget {
     /// no subrole at all (a panel, a popover, a status window) and anything the
     /// app itself has nailed down.
     var refusal: WindowRefusal? {
-        if pid == ProcessInfo.processInfo.processIdentifier { return .isVent }
+        if pid == ProcessInfo.processInfo.processIdentifier { return .isMacTools }
         if isFullScreen { return .fullScreen }
         if isMinimized { return .minimized }
         if let subrole, subrole != AXAttribute.standardWindowSubrole, subrole != AXAttribute.dialogSubrole {
@@ -128,7 +128,7 @@ struct WindowTarget {
         return WindowTarget.make(window: element, pid: pid)
     }
 
-    /// Every window of one app, for `ventctl window list` and the self test.
+    /// Every window of one app, for `mactoolsctl window list` and the self test.
     static func windows(of pid: pid_t) -> [WindowTarget] {
         let application = AXUIElementCreateApplication(pid)
         return AX.elements(application, AXAttribute.windows).map { make(window: $0, pid: pid) }

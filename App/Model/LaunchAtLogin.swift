@@ -2,7 +2,7 @@ import AppKit
 import Observation
 import ServiceManagement
 
-/// Whether macOS starts Vent when the user logs in.
+/// Whether macOS starts MacTools when the user logs in.
 ///
 /// The three states that are not a plain yes or no all happen in practice, so
 /// the UI names them instead of showing an unchecked box: a registration can
@@ -48,7 +48,7 @@ enum LaunchAtLoginStatus: Equatable, Sendable {
         switch self {
         case .off, .on: nil
         case .requiresApproval:
-            "Turn Vent on under Login Items & Extensions to finish."
+            "Turn MacTools on under Login Items & Extensions to finish."
         case .unknown:
             "Service Management reported a state this build does not know."
         }

@@ -26,7 +26,7 @@ struct SettingsTabView: View {
             } header: {
                 Text("Startup")
             } footer: {
-                Text("Vent only measures while it runs. The checklist on the Overview tracks the four permissions it asks for.")
+                Text("MacTools only measures while it runs. The checklist on the Overview tracks the four permissions it asks for.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -78,7 +78,7 @@ struct SettingsTabView: View {
                     }
                 }
                 Toggle("Show Dock icon", isOn: $settings.showDockIcon)
-                    .help("Also show Vent in the Dock and in the app switcher")
+                    .help("Also show MacTools in the Dock and in the app switcher")
                 Text("With the Dock icon on, clicking it opens the window. It is the way back when a full menu bar hides the status item behind the notch.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -126,7 +126,7 @@ struct SettingsTabView: View {
             }
         }
         .formStyle(.grouped)
-        // The user can remove the login item in System Settings while Vent is
+        // The user can remove the login item in System Settings while MacTools is
         // running, so the toggle reads the live status instead of a boolean of
         // its own, here and on every activation.
         .onAppear { setup.launchAtLogin.refresh() }

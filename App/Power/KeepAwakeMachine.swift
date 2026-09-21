@@ -2,7 +2,7 @@ import AwakeKit
 import Foundation
 import Synchronization
 
-/// Whether Vent is holding this Mac awake, and until when.
+/// Whether MacTools is holding this Mac awake, and until when.
 enum KeepAwakeState: Equatable, Sendable {
     case off
     /// Nil for "Indefinitely": the assertion runs until it is released.
@@ -20,7 +20,7 @@ enum KeepAwakeState: Equatable, Sendable {
 }
 
 /// Everything the user can set about Keep Awake. Persisted, all of it, except
-/// the state itself: Vent never comes back awake after a relaunch.
+/// the state itself: MacTools never comes back awake after a relaunch.
 struct KeepAwakeOptions: Equatable, Sendable {
     var duration: KeepAwakeDuration = .indefinite
     var keepDisplayOn = false
@@ -242,7 +242,7 @@ struct KeepAwakeMachine: Equatable, Sendable {
 struct LidSleepFacts: Equatable, Sendable {
     /// `SleepDisabled` is set, by anybody.
     var flagSet = false
-    /// And the helper's own marker says Vent set it, so Vent may clear it.
+    /// And the helper's own marker says MacTools set it, so MacTools may clear it.
     var isOurs = false
 }
 

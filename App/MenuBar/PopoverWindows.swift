@@ -4,7 +4,7 @@ import WindowKit
 /// The Windows section of the popover: the command list, at menu size.
 ///
 /// The window it acts on was captured before the popover opened: showing the
-/// popover activates Vent, and from that instant nothing else is frontmost.
+/// popover activates MacTools, and from that instant nothing else is frontmost.
 ///
 /// The list replaces the tile grid that used to be here. The two together do
 /// not fit the height the three sections share, and the list is the thing the

@@ -113,7 +113,7 @@ final class AXWindowMover {
         case .restore:
             ladder.reset()
             guard let frame = restoreMemory.frame(for: live) else {
-                return .failure(.unavailable("Vent has not moved this window yet, so there is nothing to restore."))
+                return .failure(.unavailable("MacTools has not moved this window yet, so there is nothing to restore."))
             }
             return .success(frame)
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# What Vent costs while it sits there.
+# What MacTools costs while it sits there.
 #
 # For each state the app can be in it launches ONE extra instance of the
 # installed Release bundle in the background, lets it settle, watches it with
@@ -14,7 +14,7 @@
 #   * it only ever kills the pid it started itself. The pid is the one that
 #     appeared between the two `pgrep` calls around the launch, and it is
 #     checked for this run's tag in its command line before the signal, so the
-#     user's own Vent (same bundle, same name) is never touched.
+#     user's own MacTools (same bundle, same name) is never touched.
 #
 # The popover states host the popover's own view tree in a borderless window
 # off the corner of the screen (`--popover-offscreen`): a real NSPopover never
@@ -26,7 +26,7 @@
 #   EXTRA="--power-rules off"   extra arguments for every instance it launches
 set -uo pipefail
 
-APP="/Applications/Vent.app"
+APP="/Applications/MacTools.app"
 OUT="${1:-build/measure/results.txt}"
 SETTLE="${SETTLE:-10}"
 # 13 samples 5 s apart, the first one dropped: one minute of measurement.
@@ -67,11 +67,11 @@ measure_state() {
     local name="$1" budget="$2" args="$3"
 
     local before after pid
-    before="$(pgrep -x Vent | sort)"
+    before="$(pgrep -x MacTools | sort)"
     # shellcheck disable=SC2086
     open -g -n "$APP" --args --no-activate --measure-run "$TAG" $args $EXTRA
     sleep 3
-    after="$(pgrep -x Vent | sort)"
+    after="$(pgrep -x MacTools | sort)"
     pid="$(comm -13 <(echo "$before") <(echo "$after"))"
 
     if [ -z "$pid" ] || [ "$(echo "$pid" | wc -l | tr -d ' ')" != "1" ]; then
@@ -146,7 +146,7 @@ measure_state() {
 }
 
 {
-    echo "Vent efficiency measurement"
+    echo "MacTools efficiency measurement"
     echo "date:   $(date '+%Y-%m-%d %H:%M:%S')"
     echo "bundle: $APP ($(/usr/bin/defaults read "$APP/Contents/Info.plist" CFBundleVersion 2>/dev/null || echo '?'))"
     echo "build:  $(/usr/bin/codesign -d --verbose=2 "$APP" 2>&1 | grep -i '^Identifier' || true)"
