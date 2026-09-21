@@ -183,6 +183,21 @@ struct LidSleepReconcilerTests {
         #expect(await port.flagSet == false)
     }
 
+    @Test("Quitting does not wait for an observer that waits for the quitting thread")
+    func quitDoesNotWaitForTheObserver() async {
+        let (reconciler, port, _) = make()
+        reconciler.request(true)
+        await reconciler.settled()
+
+        // The real observer hops to the main actor, and the quit path blocks
+        // the main thread: an observer that never returns stands in for it.
+        reconciler.observe { _ in
+            try? await Task.sleep(for: .seconds(3600))
+        }
+        await reconciler.clearForQuit()
+        #expect(await port.flagSet == false)
+    }
+
     // MARK: - Reconciliation
 
     @Test("A refused hold is retried up the ladder until it takes")

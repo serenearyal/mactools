@@ -95,6 +95,21 @@ enum MenuBarLabelImage {
         return configured
     }
 
+    /// Where the status light sits in the label, in the label's own
+    /// bottom-left coordinates: centred under the symbol. Nil with no symbol.
+    static func ledFrame(cells: [MenuBarCell], showIcon: Bool) -> CGRect? {
+        guard showIcon || cells.isEmpty, let icon = symbol(awake: false, solo: cells.isEmpty) else {
+            return nil
+        }
+        let diameter = MenuBarMetrics.ledDiameter
+        return CGRect(
+            x: MenuBarMetrics.horizontalPadding + ((icon.size.width - diameter) / 2),
+            y: MenuBarMetrics.ledBottom,
+            width: diameter,
+            height: diameter
+        )
+    }
+
     // MARK: - Drawing
 
     private static func draw(
@@ -110,7 +125,7 @@ enum MenuBarLabelImage {
             icon.draw(
                 in: CGRect(
                     x: x,
-                    y: ((size.height - icon.size.height) / 2).rounded(),
+                    y: ((size.height - icon.size.height) / 2).rounded() + MenuBarMetrics.ledLift,
                     width: icon.size.width,
                     height: icon.size.height
                 ),

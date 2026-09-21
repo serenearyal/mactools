@@ -85,6 +85,12 @@ public struct AwakeBlocking: Sendable, Equatable {
         }
     }
 
+    /// The status light in the menu bar and next to the Keep Awake switch.
+    public var led: AwakeLED {
+        if lidSleepBlocked { return .red }
+        return idleSleepHeld ? .amber : .green
+    }
+
     /// True while anything at all is held, Vent's or not.
     public var isBlockingAnything: Bool { idleSleepHeld || lidSleepBlocked }
 
@@ -119,5 +125,25 @@ public struct AwakeBlocking: Sendable, Equatable {
                     text: "Does not stop the display dimming unless \"Keep the display on\" is on."
                 ),
         ]
+    }
+}
+
+/// One light, three states, read back from the power manager like the words
+/// beside it: what is blocked, never what was clicked.
+public enum AwakeLED: String, Sendable, Equatable, CaseIterable {
+    /// This Mac sleeps as usual.
+    case green
+    /// Idle sleep is blocked; a closed lid still sleeps it.
+    case amber
+    /// Lid-close sleep is blocked: this Mac stays awake in a bag.
+    case red
+
+    /// The legend, short enough for one line under the switch.
+    public var meaning: String {
+        switch self {
+        case .green: "sleeps as usual"
+        case .amber: "idle sleep blocked"
+        case .red: "lid-close sleep blocked"
+        }
     }
 }

@@ -101,6 +101,9 @@ enum DebugCapture {
                     to: base.appending(path: "menubar-asleep-\(Int(scale))x-\(suffix).png")
                 )
             }
+            if let live = services.statusItemController?.debugButtonSnapshot() {
+                write(live, to: base.appending(path: "menubar-live-\(suffix).png"))
+            }
             if quit { NSApp.terminate(nil) }
         }
     }

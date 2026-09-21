@@ -367,8 +367,17 @@ final class LidSleepReconciler: Sendable {
     /// The caller bounds the wait; this is the part that must not be raced.
     /// Asking the helper from a second task while a request was in flight is
     /// exactly how a `set(true)` lands after a `set(false)`.
+    ///
+    /// The observer goes first. The quit path blocks the main thread while it
+    /// waits for this, and the observer hops to the main actor: with it still
+    /// attached, the worker waited for the thread that was waiting for the
+    /// worker, and every quit sat out its whole timeout before the helper's
+    /// last-client rule cleared the flag instead.
     func clearForQuit() async {
-        kick { $0.wanted = false }
+        kick {
+            $0.observer = nil
+            $0.wanted = false
+        }
         await settled()
     }
 

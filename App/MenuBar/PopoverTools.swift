@@ -62,6 +62,10 @@ struct PopoverTools: View {
     private var keepAwakeRow: some View {
         VStack(alignment: .leading, spacing: 0) {
             keepAwakeToolRow
+            // The light from the menu bar, and what its three colours mean.
+            hint {
+                AwakeLEDLegend(current: keepAwake.blocking.led)
+            }
             // The one thing in this panel that is worth a second line of its
             // own: Vent wants the system-wide flag off, the read-back says it
             // is still Vent's, and a closed Mac that cannot sleep gets hot.

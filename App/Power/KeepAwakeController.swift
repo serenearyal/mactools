@@ -295,7 +295,10 @@ final class KeepAwakeController {
     /// answer is known, and chasing it would wake the app every 30 s for as
     /// long as the switch is on. A clear is always sent.
     private func requestLid(_ on: Bool) {
-        reconciler.request(on && HelperGate.shared.blockedReason == nil)
+        // `--keep-awake-test` is for capture runs: it may hold an assertion,
+        // which dies with the process, but never the system-wide flag.
+        let allowed = !CommandLine.arguments.contains("--keep-awake-test")
+        reconciler.request(on && allowed && HelperGate.shared.blockedReason == nil)
     }
 
     /// What came back from a pass over the flag. The one place the UI learns

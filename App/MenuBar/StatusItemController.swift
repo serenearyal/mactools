@@ -1,4 +1,5 @@
 import AppKit
+import AwakeKit
 import Observation
 import SwiftUI
 import WindowKit
@@ -15,6 +16,11 @@ final class StatusItemController: NSObject {
     private let tipController: MenuBarTipController
 
     private var lastKey: MenuBarLabelKey?
+    /// The status light under the fan. A layer on the button and not part of
+    /// the image: the image stays a template that the system tints for the
+    /// menu bar, and the light keeps its own colour on top of it.
+    private let ledLayer = CALayer()
+    private var lastLED: AwakeLED?
     /// The rendered labels, newest first. Small on purpose: the label of a Mac
     /// that is working changes every second, so this is only ever a hit on the
     /// values that repeat - a placeholder, a temperature that sits still, the
@@ -34,6 +40,29 @@ final class StatusItemController: NSObject {
     /// the system adds. `statusItem.length` stays at the variable-length
     /// sentinel, so the button window is the only honest source.
     var itemWidth: CGFloat { statusItem.button?.window?.frame.width ?? 0 }
+    /// The button as it is drawn, light included, at 4x on a dark plate: the
+    /// status item's window belongs to the system and cannot be photographed.
+    func debugButtonSnapshot() -> NSBitmapImageRep? {
+        guard let button = statusItem.button, let layer = button.layer else { return nil }
+        let scale: CGFloat = 4
+        let size = button.bounds.size
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ), let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+        let cg = context.cgContext
+        cg.setFillColor(NSColor(white: 0.85, alpha: 1).cgColor)
+        cg.fill(CGRect(x: 0, y: 0, width: size.width * scale, height: size.height * scale))
+        cg.scaleBy(x: scale, y: scale)
+        if button.isFlipped {
+            cg.translateBy(x: 0, y: size.height)
+            cg.scaleBy(x: 1, y: -1)
+        }
+        layer.render(in: cg)
+        return rep
+    }
+
     var itemWindowNumber: Int { statusItem.button?.window?.windowNumber ?? 0 }
     /// The popover, for the debug capture path.
     var popoverWindowNumber: Int { popoverController.windowNumber }
@@ -117,6 +146,9 @@ final class StatusItemController: NSObject {
             button.sendAction(on: [.leftMouseDown, .rightMouseUp])
             button.imagePosition = .imageOnly
             button.setAccessibilityLabel("Vent system metrics")
+            button.wantsLayer = true
+            ledLayer.zPosition = 1
+            button.layer?.addSublayer(ledLayer)
         }
 
         screenObserver = NotificationCenter.default.addObserver(
@@ -167,12 +199,42 @@ final class StatusItemController: NSObject {
                 MenuBarLabel.cells(snapshot: labelSnapshot, settings: settings),
                 settings.labelStyle,
                 settings.showMenuBarIcon,
-                AppServices.shared.keepAwake.isOn
+                AppServices.shared.keepAwake.isOn,
+                AppServices.shared.keepAwake.blocking.led
             )
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in self?.track() }
         }
         render(cells: state.0, style: state.1, icon: state.2, awake: state.3, force: false)
+        placeLED(state.4, cells: state.0, icon: state.2)
+    }
+
+    /// Centred under the fan, in the button's coordinates. The button centres
+    /// an image-only label, so the label's origin is half the slack in.
+    private func placeLED(_ led: AwakeLED, cells: [MenuBarCell], icon: Bool) {
+        guard let button = statusItem.button,
+              let frame = MenuBarLabelImage.ledFrame(cells: cells, showIcon: icon) else {
+            ledLayer.isHidden = true
+            return
+        }
+        let origin = CGPoint(
+            x: ((button.bounds.width - lastImageSize.width) / 2).rounded(),
+            y: ((button.bounds.height - lastImageSize.height) / 2).rounded()
+        )
+        let y = button.isFlipped
+            ? button.bounds.height - origin.y - frame.maxY
+            : origin.y + frame.minY
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        ledLayer.isHidden = false
+        ledLayer.frame = CGRect(x: origin.x + frame.minX, y: y, width: frame.width, height: frame.height)
+        ledLayer.cornerRadius = frame.width / 2
+        ledLayer.backgroundColor = led.nsColor.cgColor
+        CATransaction.commit()
+        if led != lastLED {
+            lastLED = led
+            button.setAccessibilityLabel("Vent system metrics, \(led.meaning)")
+        }
     }
 
     /// Only the domains the label draws.
@@ -192,6 +254,11 @@ final class StatusItemController: NSObject {
             icon: settings.showMenuBarIcon,
             awake: AppServices.shared.keepAwake.isOn,
             force: force
+        )
+        placeLED(
+            AppServices.shared.keepAwake.blocking.led,
+            cells: MenuBarLabel.cells(snapshot: labelSnapshot, settings: settings),
+            icon: settings.showMenuBarIcon
         )
     }
 

@@ -312,3 +312,16 @@ func guardCanBeTurnedOff() {
         ) == .keep
     )
 }
+
+@Suite("Awake LED")
+struct AwakeLEDTests {
+    @Test("green when nothing is held, amber for idle sleep, red whenever the lid flag is set")
+    func states() {
+        #expect(AwakeBlocking().led == .green)
+        #expect(AwakeBlocking(idleSleepHeld: true).led == .amber)
+        #expect(AwakeBlocking(idleSleepHeld: true, lidSleepBlocked: true, lidSleepIsOurs: true).led == .red)
+        // A flag somebody set with pmset is just as red: the Mac stays awake
+        // in a bag whoever asked for it.
+        #expect(AwakeBlocking(lidSleepBlocked: true).led == .red)
+    }
+}

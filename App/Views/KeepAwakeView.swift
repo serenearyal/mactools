@@ -198,14 +198,16 @@ struct KeepAwakeView: View {
     @ViewBuilder
     private var status: some View {
         HStack(spacing: Layout.gutter) {
-            Image(systemName: keepAwake.isOn ? "circle.fill" : "circle")
-                .font(.system(size: 8))
-                .foregroundStyle(keepAwake.isOn ? Color.accentColor : Color.secondary)
+            // The same light as under the fan in the menu bar.
+            AwakeLEDDot(led: keepAwake.blocking.led)
                 .frame(width: 20, alignment: .center)
-            Text(keepAwake.detailText)
-                .foregroundStyle(keepAwake.isOn ? .primary : .secondary)
-                .monospacedDigit()
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(keepAwake.detailText)
+                    .foregroundStyle(keepAwake.isOn ? .primary : .secondary)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+                AwakeLEDLegend(current: keepAwake.blocking.led)
+            }
             Spacer(minLength: Layout.gutter)
         }
         .font(.callout)

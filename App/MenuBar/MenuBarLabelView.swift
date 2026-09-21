@@ -115,6 +115,11 @@ enum MenuBarMetrics {
     static let cellSpacing: CGFloat = 4
     static let iconSpacing: CGFloat = 3
     static let horizontalPadding: CGFloat = 1
+    /// The status light under the symbol: the symbol moves up by `ledLift`
+    /// to make room for a dot of `ledDiameter` that starts `ledBottom` up.
+    static let ledLift: CGFloat = 3
+    static let ledDiameter: CGFloat = 4
+    static let ledBottom: CGFloat = 1
     /// Slack on every cell, so a rounding difference between the AppKit
     /// measurement and the SwiftUI layout can never truncate a value.
     static let widthSlack: CGFloat = 1
