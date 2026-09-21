@@ -2,14 +2,18 @@ import AppKit
 import SwiftUI
 import WindowKit
 
+// The views the window manager is drawn with: the glyph of a target region,
+// the command list the tab, the popover and the status menu share, the card
+// that names the window in front, the gap slider and the conflict banner.
+
 // MARK: - The miniature screen
 
-/// The unit screen every tile is drawn on.
+/// The unit screen every glyph is drawn on.
 ///
 /// The preview asks `WindowLayout` for the real frame on a 1600 x 1000 screen
-/// and scales the answer, so a tile cannot drift from what the click does: the
+/// and scales the answer, so a glyph cannot drift from what the click does: the
 /// picture and the move come from one function. The gap is scaled with it, so
-/// the slider moves the tiles apart on screen exactly as it moves the windows.
+/// a caller that passes one sees the same inset the windows get.
 enum WindowTilePreview {
     static let unit = ScreenFrame(
         id: 0,
@@ -39,204 +43,61 @@ enum WindowTilePreview {
     }
 }
 
-/// One tile: a rounded screen outline with the target region filled in.
-struct WindowTile: View {
+/// The little screen beside a command in the list: the same outline as a tile,
+/// at menu size, with the target region filled in.
+///
+/// It comes from `WindowTilePreview` like the tiles do, so the picture and the
+/// click can never say different things. Every edge is rounded to a whole
+/// point, which is what keeps it crisp at 1x as well as at 2x, and the colours
+/// are the label colour at two opacities, so it reads as a template glyph in
+/// both appearances.
+struct WindowRegionGlyph: View {
     let action: WindowAction
-    let size: CGSize
-    let gap: CGFloat
-    let screenWidth: CGFloat
-    var shortcut: String?
+    var size = CGSize(width: 20, height: 14)
     var enabled = true
-    let perform: (WindowAction) -> Void
 
-    @State private var hovering = false
-
-    private var corner: CGFloat { max(4, size.height / 10) }
+    /// The screen bezel: the region is drawn inside this inset.
+    private static let inset: CGFloat = 2
+    private var corner: CGFloat { 3 }
 
     var body: some View {
-        Button { perform(action) } label: {
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .fill(Color(nsColor: .textBackgroundColor).opacity(hovering ? 1 : 0.55))
-                RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .strokeBorder(
-                        Color(nsColor: .separatorColor).opacity(hovering ? 0.9 : 0.6),
-                        lineWidth: 1
-                    )
-                region
-                    .padding(max(3, size.height / 14))
-            }
-            .frame(width: size.width, height: size.height)
-            .contentShape(.rect)
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.35), lineWidth: 1)
+            content
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.4)
-        .onHover { hovering = $0 && enabled }
-        .help(helpText)
-        .accessibilityLabel(action.title)
+        .frame(width: size.width, height: size.height)
+        .opacity(enabled ? 1 : 0.45)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
-    private var region: some View {
-        if let unit = WindowTilePreview.region(for: action, gap: gap, screenWidth: screenWidth) {
-            GeometryReader { proxy in
-                RoundedRectangle(cornerRadius: max(2, corner - 2), style: .continuous)
-                    .fill(Color.accentColor.opacity(hovering ? 0.62 : 0.34))
-                    .frame(
-                        width: max(unit.width * proxy.size.width, 2),
-                        height: max(unit.height * proxy.size.height, 2)
-                    )
-                    .offset(x: unit.minX * proxy.size.width, y: unit.minY * proxy.size.height)
-            }
+    private var content: some View {
+        if let unit = WindowTilePreview.region(for: action, gap: 0, screenWidth: 1600) {
+            let field = CGRect(
+                x: WindowRegionGlyph.inset,
+                y: WindowRegionGlyph.inset,
+                width: size.width - WindowRegionGlyph.inset * 2,
+                height: size.height - WindowRegionGlyph.inset * 2
+            )
+            let minX = (field.minX + unit.minX * field.width).rounded()
+            let minY = (field.minY + unit.minY * field.height).rounded()
+            let maxX = (field.minX + unit.maxX * field.width).rounded()
+            let maxY = (field.minY + unit.maxY * field.height).rounded()
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(Color.primary.opacity(0.55))
+                .frame(width: max(maxX - minX, 2), height: max(maxY - minY, 2))
+                .offset(x: minX, y: minY)
+        } else {
+            // Restore, larger, smaller and the two display moves are not a
+            // region of the screen: the symbol says what they do instead.
+            Image(systemName: action.symbolName)
+                .font(.system(size: size.height * 0.58, weight: .medium))
+                .foregroundStyle(Color.primary.opacity(0.55))
+                .frame(width: size.width, height: size.height)
         }
-    }
-
-    private var helpText: String {
-        guard let shortcut, !shortcut.isEmpty else { return action.title }
-        return "\(action.title)  \(shortcut)"
-    }
-}
-
-// MARK: - The grid
-
-/// The shared window grid: one header, nine tiles, five thirds and the buttons
-/// that are not a rectangle.
-///
-/// The popover and the Windows tab draw the same view at two widths. Every size
-/// below comes from `columnWidth`, so the tiles stay screen shaped at both.
-struct WindowTileGrid: View {
-    let controller: WindowManagerController
-    /// How wide the grid may be. The tiles are a third of it.
-    let columnWidth: CGFloat
-    var compact = false
-    /// Closes the popover before the window moves. Nothing on the tab.
-    var beforeAction: () -> Void = {}
-
-    private var spacing: CGFloat { compact ? 8 : 10 }
-    private var tileSize: CGSize {
-        let width = ((columnWidth - spacing * 2) / 3).rounded(.down)
-        return CGSize(width: width, height: (width / 1.75).rounded())
-    }
-
-    private var thirdSize: CGSize {
-        let width = ((columnWidth - spacing * 4) / 5).rounded(.down)
-        return CGSize(width: width, height: (width / 1.75).rounded())
-    }
-
-    private var gap: CGFloat { controller.gap }
-    private var screenWidth: CGFloat {
-        max(NSScreen.main?.frame.width ?? 1600, 1)
-    }
-
-    private static let rows: [[WindowAction]] = [
-        [.topLeft, .topHalf, .topRight],
-        [.leftHalf, .maximize, .rightHalf],
-        [.bottomLeft, .bottomHalf, .bottomRight],
-    ]
-    private static let thirds: [WindowAction] = [
-        .firstThird, .centerThird, .lastThird, .firstTwoThirds, .lastTwoThirds,
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 10 : 14) {
-            WindowTargetCard(controller: controller, compact: compact)
-            if controller.accessibilityGranted {
-                // One column for everything under the card: the tiles decide
-                // its width, and the buttons and the gap line up with them
-                // instead of running out to the edges of the panel.
-                VStack(alignment: .leading, spacing: compact ? 10 : 14) {
-                    grid
-                    thirdsRow
-                    buttons
-                    GapSlider(controller: controller, compact: compact)
-                }
-                .frame(width: columnWidth)
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var grid: some View {
-        VStack(spacing: spacing) {
-            ForEach(Array(WindowTileGrid.rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: spacing) {
-                    ForEach(row, id: \.self) { action in
-                        tile(action, size: tileSize)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
-
-    private var thirdsRow: some View {
-        HStack(spacing: spacing) {
-            ForEach(WindowTileGrid.thirds, id: \.self) { action in
-                tile(action, size: thirdSize)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
-
-    private func tile(_ action: WindowAction, size: CGSize) -> some View {
-        WindowTile(
-            action: action,
-            size: size,
-            gap: gap,
-            screenWidth: screenWidth,
-            shortcut: controller.shortcutDisplay(for: action),
-            enabled: controller.canAct,
-            perform: perform
-        )
-    }
-
-    private var buttons: some View {
-        // A flowing row: four buttons always, two more when a second display is
-        // plugged in. `ViewThatFits` would drop one; wrapping keeps them all.
-        WrappingRow(spacing: compact ? 6 : 8) {
-            actionButton(.almostMaximize)
-            actionButton(.center)
-            actionButton(.maximizeHeight)
-            actionButton(.restore)
-            if controller.screenCount > 1 {
-                // The two arrows alone in the popover: with their titles the
-                // row wraps onto a third line, and the section has a fixed
-                // height. The tooltip and the grid above say what they do.
-                actionButton(.previousDisplay, iconOnly: compact)
-                actionButton(.nextDisplay, iconOnly: compact)
-            }
-        }
-    }
-
-    private func actionButton(_ action: WindowAction, iconOnly: Bool = false) -> some View {
-        Button { perform(action) } label: {
-            Group {
-                if iconOnly {
-                    Image(systemName: action.symbolName)
-                } else {
-                    Label(action.title, systemImage: action.symbolName)
-                        .labelStyle(.titleAndIcon)
-                }
-            }
-            .font(compact ? .caption : .callout)
-            .lineLimit(1)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(compact ? .small : .regular)
-        .disabled(!controller.canAct)
-        .help(helpText(action))
-    }
-
-    private func helpText(_ action: WindowAction) -> String {
-        guard let shortcut = controller.shortcutDisplay(for: action) else { return action.title }
-        return "\(action.title)  \(shortcut)"
-    }
-
-    private func perform(_ action: WindowAction) {
-        beforeAction()
-        controller.apply(action, reactivate: compact)
     }
 }
 
@@ -474,12 +335,130 @@ struct WindowConflictBanner: View {
     }
 }
 
+// MARK: - The command list
+
+/// Rectangle's menu, as a view: every action in its group, with the glyph of
+/// the region it fills, its name, and its chord on the right.
+///
+/// The Windows tab, the popover and the status item's Window submenu all draw
+/// `controller.commandGroups`, so a row can only be added in one place.
+struct WindowCommandListView: View {
+    let controller: WindowManagerController
+    var compact = false
+    /// Two columns when the pane is wide enough: the whole list is then on
+    /// screen at the default window size, the way the menu it copies is.
+    var columns = 1
+    /// Closes the popover before the window moves. Nothing on the tab.
+    var beforeAction: () -> Void = {}
+
+    /// Where the second column starts. The halves, the corners and the thirds
+    /// go on the left; the whole-screen actions and the displays on the right.
+    private static let splitGroup = 3
+
+    var body: some View {
+        if columns > 1 {
+            HStack(alignment: .top, spacing: Layout.cardSpacing) {
+                column(Array(0..<WindowCommandListView.splitGroup))
+                column(Array(WindowCommandListView.splitGroup..<controller.commandGroups.count))
+            }
+        } else {
+            column(Array(controller.commandGroups.indices))
+        }
+    }
+
+    private func column(_ indices: [Int]) -> some View {
+        let groups = controller.commandGroups
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(indices, id: \.self) { index in
+                if index != indices.first {
+                    Divider()
+                        .padding(.vertical, compact ? 4 : 6)
+                        .padding(.horizontal, 4)
+                }
+                ForEach(groups[index].rows) { row in
+                    WindowCommandRowView(row: row, compact: compact, perform: perform)
+                        .contextMenu { menu(for: row) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func menu(for row: WindowCommandRow) -> some View {
+        // The shortcut set has no chord for these two, so there is nothing to
+        // switch off. Rectangle leaves them open as well.
+        if controller.choice != .off, !ShortcutSet.unbound.contains(row.action) {
+            let enabled = controller.data.isEnabled(row.action)
+            Button(enabled ? "Turn this shortcut off" : "Turn this shortcut on") {
+                controller.setEnabled(!enabled, for: row.action)
+            }
+        }
+    }
+
+    private func perform(_ action: WindowAction) {
+        beforeAction()
+        controller.apply(action, reactivate: compact)
+    }
+}
+
+/// One line of the command list. A whole-row button: a click runs the action
+/// on the window that was in front.
+struct WindowCommandRowView: View {
+    let row: WindowCommandRow
+    var compact = false
+    let perform: (WindowAction) -> Void
+
+    @State private var hovering = false
+
+    private var height: CGFloat { compact ? 17 : 24 }
+    private var glyph: CGSize {
+        compact ? CGSize(width: 17, height: 12) : CGSize(width: 21, height: 15)
+    }
+
+    var body: some View {
+        Button { perform(row.action) } label: {
+            HStack(spacing: compact ? 7 : 10) {
+                WindowRegionGlyph(action: row.action, size: glyph, enabled: row.isAvailable)
+                Text(row.title)
+                    .font(compact ? .caption : .callout)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if let shortcut = row.shortcutDisplay {
+                    KeyCapRow(display: shortcut, enabled: row.isAvailable, compact: compact)
+                }
+            }
+            .padding(.horizontal, 5)
+            .frame(height: height)
+            .background {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(hovering ? 0.07 : 0))
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(!row.isAvailable)
+        .foregroundStyle(row.isAvailable ? Color.primary : Color.secondary)
+        .opacity(row.isAvailable ? 1 : 0.55)
+        .onHover { hovering = $0 && row.isAvailable }
+        .help(help)
+        .accessibilityLabel(row.title)
+    }
+
+    private var help: String {
+        guard let shortcut = row.shortcutDisplay else { return row.title }
+        return "\(row.title)  \(shortcut)"
+    }
+}
+
 // MARK: - Key caps
 
 /// "⌃⌥←" as three key caps, the way the system draws a shortcut.
 struct KeyCapRow: View {
     let display: String
     var enabled = true
+    /// The popover's size: the same caps one step smaller.
+    var compact = false
 
     private static let modifiers: Set<Character> = ["⌃", "⌥", "⇧", "⌘"]
 
@@ -499,10 +478,11 @@ struct KeyCapRow: View {
         HStack(spacing: 2) {
             ForEach(Array(caps.enumerated()), id: \.offset) { _, cap in
                 Text(cap)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: compact ? 9.5 : 11, weight: .medium))
                     .foregroundStyle(enabled ? Color.primary : Color.secondary)
-                    .frame(minWidth: 17, minHeight: 17)
-                    .padding(.horizontal, 2)
+                    // One width for every cap, so the chords of a whole list
+                    // line up in a column instead of ragging to the right.
+                    .frame(width: compact ? 14 : 17, height: compact ? 14 : 17)
                     .background {
                         RoundedRectangle(cornerRadius: 4, style: .continuous)
                             .fill(Color(nsColor: .textBackgroundColor).opacity(enabled ? 1 : 0.5))

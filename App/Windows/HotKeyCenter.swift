@@ -78,10 +78,15 @@ final class HotKeyCenter {
             results[binding.action] = claim(binding)
         }
         registrations = results
-        let taken = results.filter { $0.value == .taken }.count
-        log.notice(
-            "hot keys: \(results.count - taken, privacy: .public) registered, \(taken, privacy: .public) taken"
-        )
+        // The one summary line is the controller's: it knows the set. This
+        // only names a chord the system refused outright, which is rare and
+        // worth a line of its own.
+        for (action, state) in results {
+            guard case .failed(let status) = state else { continue }
+            log.error(
+                "hot key \(action.rawValue, privacy: .public): RegisterEventHotKey failed (\(status, privacy: .public))"
+            )
+        }
         return results
     }
 
@@ -158,5 +163,49 @@ final class HotKeyCenter {
         guard let action = actions[id] else { return OSStatus(eventNotHandledErr) }
         onAction?(action)
         return noErr
+    }
+
+    // MARK: - The self test's way in
+
+    /// Sends the `kEventHotKeyPressed` event of one registered action to the
+    /// application event target, which is where `RegisterEventHotKey` sends
+    /// the real one.
+    ///
+    /// It proves the whole chain after the key press: the id the registration
+    /// handed out, the handler installed above, the action lookup and whatever
+    /// `onAction` does with it. It does NOT prove that the system delivers the
+    /// physical chord to this app - only a finger on the keyboard does that,
+    /// and no test may press a key on the user's machine.
+    ///
+    /// Nil when this action holds no claim, so a caller cannot mistake an
+    /// unregistered chord for a working one.
+    @discardableResult
+    func sendRegisteredHotKey(for action: WindowAction) -> OSStatus? {
+        guard registrations[action]?.isRegistered == true,
+              let id = actions.first(where: { $0.value == action })?.key
+        else { return nil }
+
+        var event: EventRef?
+        let created = CreateEvent(
+            nil,
+            OSType(kEventClassKeyboard),
+            UInt32(kEventHotKeyPressed),
+            0,
+            OSType(kEventAttributeNone),
+            &event
+        )
+        guard created == noErr, let event else { return created }
+        defer { ReleaseEvent(event) }
+
+        var hotKeyID = EventHotKeyID(signature: HotKeyCenter.signature, id: id)
+        let set = SetEventParameter(
+            event,
+            EventParamName(kEventParamDirectObject),
+            EventParamType(typeEventHotKeyID),
+            MemoryLayout<EventHotKeyID>.size,
+            &hotKeyID
+        )
+        guard set == noErr else { return set }
+        return SendEventToEventTarget(event, GetApplicationEventTarget())
     }
 }

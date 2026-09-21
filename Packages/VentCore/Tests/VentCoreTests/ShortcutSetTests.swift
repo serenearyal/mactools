@@ -3,12 +3,22 @@ import Testing
 
 import WindowKit
 
-@Test("a set binds every action exactly once", arguments: ShortcutSet.all)
+/// Rectangle ships Center Half and Almost Maximize without a chord, and Vent
+/// ships what Rectangle ships. Every other action has exactly one.
+@Test("a set binds every action but the two Rectangle leaves open", arguments: ShortcutSet.all)
 func everyActionHasOneBinding(set: ShortcutSet) {
-    #expect(set.bindings.count == WindowAction.allCases.count)
-    for action in WindowAction.allCases {
+    #expect(set.bindings.count == WindowAction.allCases.count - ShortcutSet.unbound.count)
+    for action in WindowAction.allCases where !ShortcutSet.unbound.contains(action) {
         #expect(set.binding(for: action) != nil, "\(set.id) has no binding for \(action.rawValue)")
     }
+    for action in ShortcutSet.unbound {
+        #expect(set.binding(for: action) == nil, "\(set.id) binds \(action.rawValue)")
+    }
+}
+
+@Test("the actions without a default are Center Half and Almost Maximize")
+func unboundActions() {
+    #expect(ShortcutSet.unbound == [.centerHalf, .almostMaximize])
 }
 
 @Test("a set has no chord twice", arguments: ShortcutSet.all)
@@ -23,19 +33,23 @@ func theSetsDoNotOverlap() {
     #expect(ShortcutSet.rectangle.chords.isDisjoint(with: ShortcutSet.alternate.chords))
 }
 
-@Test("the alternate set is the first one with shift added")
-func alternateIsTheShiftedSet() throws {
-    for action in WindowAction.allCases {
+@Test("the alternate set keeps the key of every action")
+func alternateKeepsTheKeys() throws {
+    for action in WindowAction.allCases where !ShortcutSet.unbound.contains(action) {
         let first = try #require(ShortcutSet.rectangle.binding(for: action))
         let second = try #require(ShortcutSet.alternate.binding(for: action))
         #expect(first.keyCode == second.keyCode)
-        #expect(second.modifiers == first.modifiers.union(.shift))
-        #expect(first.modifiers.contains(.shift) == false)
+        #expect(first.modifiers.contains(.option))
+        // Every chord of the first set carries ⌥, so a chord without it can
+        // never collide with one: that is what the three extras rely on.
+        #expect(second.modifiers != first.modifiers)
     }
 }
 
+/// Rectangle's defaults, read off its own menu. A wrong line here is a
+/// shortcut that does nothing in the fingers of somebody who used Rectangle.
 @Test(
-    "the tile shortcuts are the ones Rectangle uses",
+    "the shortcuts are the ones Rectangle ships",
     arguments: [
         (WindowAction.leftHalf, "⌃⌥←"),
         (.rightHalf, "⌃⌥→"),
@@ -55,10 +69,9 @@ func alternateIsTheShiftedSet() throws {
         (.restore, "⌃⌥⌫"),
         (.smaller, "⌃⌥-"),
         (.larger, "⌃⌥="),
+        (.maximizeHeight, "⌃⌥⇧↑"),
         (.previousDisplay, "⌃⌥⌘←"),
         (.nextDisplay, "⌃⌥⌘→"),
-        (.maximizeHeight, "⌃⌥⌘↑"),
-        (.almostMaximize, "⌃⌥⌘↩"),
     ]
 )
 func rectangleSetDisplay(action: WindowAction, display: String) throws {
@@ -67,14 +80,14 @@ func rectangleSetDisplay(action: WindowAction, display: String) throws {
 }
 
 @Test(
-    "the alternate set adds the shift symbol in the right place",
+    "the alternate set moves every chord out of the first one's way",
     arguments: [
-        (WindowAction.leftHalf, "⌃⌥⇧←"),
-        (.maximize, "⌃⌥⇧↩"),
-        (.topLeft, "⌃⌥⇧U"),
-        (.nextDisplay, "⌃⌥⇧⌘→"),
-        (.maximizeHeight, "⌃⌥⇧⌘↑"),
-        (.almostMaximize, "⌃⌥⇧⌘↩"),
+        (WindowAction.leftHalf, "⌃⌥⇧⌘←"),
+        (.maximize, "⌃⌥⇧⌘↩"),
+        (.topLeft, "⌃⌥⇧⌘U"),
+        (.nextDisplay, "⌃⇧⌘→"),
+        (.previousDisplay, "⌃⇧⌘←"),
+        (.maximizeHeight, "⌃⇧⌘↑"),
     ]
 )
 func alternateSetDisplay(action: WindowAction, display: String) throws {
@@ -157,10 +170,16 @@ func actionsHaveLabels(action: WindowAction) {
     #expect(action.title.contains("\u{2013}") == false)
 }
 
-@Test("there are seventeen placements and five other actions")
+@Test("there are eighteen placements and five other actions")
 func placementCount() {
-    #expect(WindowAction.placements.count == 17)
-    #expect(WindowAction.allCases.count == 22)
+    #expect(WindowAction.placements.count == 18)
+    #expect(WindowAction.allCases.count == 23)
+}
+
+@Test("only the two display moves need a second screen", arguments: WindowAction.allCases)
+func needsSecondDisplay(action: WindowAction) {
+    let moves: Set<WindowAction> = [.nextDisplay, .previousDisplay]
+    #expect(action.needsSecondDisplay == moves.contains(action))
 }
 
 @Test("every refusal has a sentence for the user", arguments: WindowRefusal.allCases)

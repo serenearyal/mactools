@@ -6,6 +6,7 @@
 public enum WindowAction: String, CaseIterable, Codable, Sendable, Hashable {
     case leftHalf = "leftHalf"
     case rightHalf = "rightHalf"
+    case centerHalf = "centerHalf"
     case topHalf = "topHalf"
     case bottomHalf = "bottomHalf"
     case topLeft = "topLeft"
@@ -31,6 +32,7 @@ public enum WindowAction: String, CaseIterable, Codable, Sendable, Hashable {
         switch self {
         case .leftHalf: "Left Half"
         case .rightHalf: "Right Half"
+        case .centerHalf: "Center Half"
         case .topHalf: "Top Half"
         case .bottomHalf: "Bottom Half"
         case .topLeft: "Top Left"
@@ -54,11 +56,17 @@ public enum WindowAction: String, CaseIterable, Codable, Sendable, Hashable {
         }
     }
 
-    /// A suggestion for the button icon. The views are free to use another one.
+    /// The symbol for an action that is not a region of the screen.
+    ///
+    /// The command list draws a little screen for everything it can place, and
+    /// falls back to this symbol for the five it cannot. They are drawn inside
+    /// that same screen outline, so each one is a bare mark - a minus, a plus,
+    /// an arrow - and never a framed symbol that would box a box.
     public var symbolName: String {
         switch self {
         case .leftHalf: "rectangle.lefthalf.filled"
         case .rightHalf: "rectangle.righthalf.filled"
+        case .centerHalf: "rectangle.center.inset.filled"
         case .topHalf: "rectangle.tophalf.filled"
         case .bottomHalf: "rectangle.bottomhalf.filled"
         case .topLeft: "rectangle.inset.topleft.filled"
@@ -75,10 +83,10 @@ public enum WindowAction: String, CaseIterable, Codable, Sendable, Hashable {
         case .maximizeHeight: "arrow.up.and.down"
         case .center: "arrow.down.right.and.arrow.up.left"
         case .restore: "arrow.uturn.backward"
-        case .larger: "plus.magnifyingglass"
-        case .smaller: "minus.magnifyingglass"
-        case .nextDisplay: "arrow.forward.to.line"
-        case .previousDisplay: "arrow.backward.to.line"
+        case .larger: "plus"
+        case .smaller: "minus"
+        case .nextDisplay: "arrow.right"
+        case .previousDisplay: "arrow.left"
         }
     }
 
@@ -97,6 +105,13 @@ public enum WindowAction: String, CaseIterable, Codable, Sendable, Hashable {
     /// The placement actions, in the order the tile grid shows them.
     public static let placements: [WindowAction] = WindowAction.allCases.filter(\.isPlacement)
 
+    /// True when the action does nothing at all on a Mac with one display.
+    /// The command list dims these rows rather than hiding them, so the row
+    /// and its chord stay where the user learned them.
+    public var needsSecondDisplay: Bool {
+        self == .nextDisplay || self == .previousDisplay
+    }
+
     /// The slot this action fills, or nil when the action is not one tile.
     ///
     /// The screen decides the axis of the thirds: on a portrait display they
@@ -106,6 +121,9 @@ public enum WindowAction: String, CaseIterable, Codable, Sendable, Hashable {
         switch self {
         case .leftHalf: return WindowSlot(axis: .horizontal, position: .first, span: .half)
         case .rightHalf: return WindowSlot(axis: .horizontal, position: .last, span: .half)
+        // A half of the width, centred. It follows the halves and not the
+        // thirds, so it stays a vertical band on a portrait screen too.
+        case .centerHalf: return WindowSlot(axis: .horizontal, position: .center, span: .half)
         case .topHalf: return WindowSlot(axis: .vertical, position: .first, span: .half)
         case .bottomHalf: return WindowSlot(axis: .vertical, position: .last, span: .half)
         case .firstThird: return WindowSlot(axis: thirdsAxis, position: .first, span: .third)

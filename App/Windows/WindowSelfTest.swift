@@ -142,6 +142,106 @@ enum WindowSelfTest {
         mover.resetCycle()
         rows.append(await clamp(.lastThird, on: target, mover: mover, screen: screen, edge: .trailing))
 
+        rows.append(contentsOf: await hotKeys(on: target, screen: screen, services: services))
+
+        return rows
+    }
+
+    // MARK: - The shortcuts
+
+    /// Every chord of the Rectangle set, from the registration to the window.
+    ///
+    /// Two facts per binding. First, `RegisterEventHotKey` answered `noErr`,
+    /// which is the claim itself. Second, the Carbon `kEventHotKeyPressed`
+    /// event of that claim, sent to the application event target the way the
+    /// system sends it, arrives in the handler and moves the window.
+    ///
+    /// What it does not prove: that macOS delivers the physical chord to this
+    /// app. Only a finger on the keyboard shows that, and no test may press a
+    /// key on somebody's machine. The `--window-selftest` run posts no input
+    /// event at all.
+    ///
+    /// Nothing but the probe is ever touched: the controller's hot key target
+    /// is pinned to the probe window for the whole section, so the frontmost
+    /// window - the user's - is not even read.
+    private static func hotKeys(
+        on target: WindowTarget,
+        screen: ScreenFrame,
+        services: AppServices
+    ) async -> [Row] {
+        let windows = services.windows
+        let mover = windows.mover
+        windows.hotKeyTarget = { target.refreshed() ?? target }
+        defer { windows.hotKeyTarget = nil }
+        // The set under test, for this run only: the settings file keeps
+        // whatever the user chose.
+        windows.overrideChoice(.rectangle)
+
+        var rows: [Row] = []
+        for binding in ShortcutSet.rectangle.bindings {
+            let action = binding.action
+            let state = windows.registrations[action]
+            guard state == .registered else {
+                rows.append(
+                    Row(
+                        name: "chord \(action.rawValue)",
+                        passed: false,
+                        expected: "\(binding.display) registered",
+                        actual: state?.summary ?? "no answer"
+                    )
+                )
+                continue
+            }
+
+            mover.resetCycle()
+            let before = target.refreshed()?.frame
+            let expected = WindowLayout.target(
+                action: action,
+                on: screen,
+                current: before,
+                gap: windows.gap
+            )
+            let status = windows.dispatchHotKeyForSelfTest(action)
+            try? await Task.sleep(for: settle)
+            let dispatched = windows.lastHotKeyAction == action
+            let actual = target.refreshed()?.frame
+
+            // A placement says where the window has to be. The rest - restore,
+            // larger, smaller, the display moves - only has to reach the
+            // handler: what they do depends on the history or on a second
+            // display this Mac may not have.
+            if let expected, let actual {
+                rows.append(
+                    Row(
+                        name: "chord \(action.rawValue)",
+                        passed: dispatched && status == noErr && matches(actual, expected),
+                        expected: "\(binding.display) -> \(text(expected))",
+                        actual: dispatched ? text(actual) : "handler not reached"
+                    )
+                )
+            } else {
+                rows.append(
+                    Row(
+                        name: "chord \(action.rawValue)",
+                        passed: dispatched && status == noErr,
+                        expected: "\(binding.display) reaches the handler",
+                        actual: dispatched ? "handled, status \(status ?? -1)" : "handler not reached"
+                    )
+                )
+            }
+        }
+
+        // The two actions Rectangle ships without a chord.
+        for action in ShortcutSet.unbound.sorted(by: { $0.rawValue < $1.rawValue }) {
+            rows.append(
+                Row(
+                    name: "chord \(action.rawValue)",
+                    passed: ShortcutSet.rectangle.binding(for: action) == nil,
+                    expected: "no default chord",
+                    actual: ShortcutSet.rectangle.binding(for: action)?.display ?? "none"
+                )
+            )
+        }
         return rows
     }
 
@@ -265,6 +365,15 @@ enum WindowSelfTest {
                     + "| \(row.expected.padded(21)) | \(row.actual.padded(21)) |"
             )
         }
+        lines.append("")
+        lines.append(
+            """
+            The chord rows drive the Carbon handler that RegisterEventHotKey feeds, \
+            against the probe window. They prove the claim, the dispatch and the move. \
+            They do not prove that macOS delivers a physical key press to this app: \
+            no key is pressed, and that stays a user check.
+            """
+        )
         lines.append("")
         lines.append("\(rows.count - failures)/\(rows.count) passed")
         lines.append(failures == 0 ? "WINDOW SELFTEST: PASS" : "WINDOW SELFTEST: FAIL")

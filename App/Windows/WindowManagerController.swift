@@ -74,10 +74,16 @@ final class WindowManagerController {
 
     var data: WindowSettingsData { settings.windows }
 
+    /// The user picked a set: in the tab, in the popover or on the banner.
+    /// It writes the marker as well as the choice, so an "Off" chosen here is
+    /// never migrated back to Rectangle's layout at the next launch.
     func setChoice(_ choice: WindowShortcutChoice) {
         choiceOverride = nil
         if persistsShortcutChoice {
-            settings.windows.shortcutChoice = choice
+            var data = settings.windows
+            data.shortcutChoice = choice
+            data.shortcutChoiceIsUserChoice = true
+            settings.windows = data
         } else {
             choiceOverride = choice
         }
@@ -127,13 +133,37 @@ final class WindowManagerController {
         registrations = [:]
     }
 
+    /// Claims the chords of the chosen set and writes down what the system
+    /// said about each one.
+    ///
+    /// The log line is the one thing a user can hand over when a shortcut does
+    /// nothing: it names the set, how many chords are live and the OSStatus of
+    /// every chord that was refused.
     func applyShortcuts() {
         guard let set = choice.set else {
             hotKeys.unregisterAll()
             registrations = [:]
+            log.notice("shortcuts: off, 0 registered")
             return
         }
         registrations = hotKeys.register(set.bindings, disabled: settings.windows.disabled)
+        let registered = registrations.values.filter(\.isRegistered).count
+        let taken = registrations.values.filter { $0 == .taken }.count
+        let failures = registrations
+            .compactMap { action, state -> String? in
+                guard case .failed(let status) = state else { return nil }
+                return "\(action.rawValue) \(status)"
+            }
+            .sorted()
+        log.notice(
+            """
+            shortcuts: set \(set.id, privacy: .public), \
+            \(registered, privacy: .public) registered, \
+            \(taken, privacy: .public) taken, \
+            \(failures.count, privacy: .public) failed\
+            \(failures.isEmpty ? "" : " [" + failures.joined(separator: ", ") + "]", privacy: .public)
+            """
+        )
     }
 
     func refreshConflicts() {
@@ -220,6 +250,20 @@ final class WindowManagerController {
         return set.binding(for: action)?.display
     }
 
+    /// The command list: every action, grouped, with its chord and whether it
+    /// can run on the window in front right now.
+    ///
+    /// The Windows tab, the popover and the status item's Window submenu all
+    /// draw this one value, so the three cannot drift apart.
+    var commandGroups: [WindowCommandGroup] {
+        WindowCommandList.groups(
+            set: choice.set,
+            disabled: settings.windows.disabled,
+            canAct: canAct,
+            screenCount: screenCount
+        )
+    }
+
     /// The banner appears while another manager runs and Vent is not already
     /// out of its way. On the alternate set with every chord registered there
     /// is no conflict left to report.
@@ -270,7 +314,12 @@ final class WindowManagerController {
     /// window the popover remembered: a shortcut is pressed while the user is
     /// in the window they mean.
     private func applyFromHotKey(_ action: WindowAction) {
-        guard let live = WindowTarget.captureFrontmost() else {
+        lastHotKeyAction = action
+        // The self test drives this path against its own probe window. When
+        // the hook is installed the frontmost window is never read at all: a
+        // test may not move a window of the user's, not even by accident.
+        let candidate = hotKeyTarget.map { $0() } ?? WindowTarget.captureFrontmost()
+        guard let live = candidate else {
             log.notice("hot key \(action.rawValue, privacy: .public): no window in front")
             return
         }
@@ -286,6 +335,26 @@ final class WindowManagerController {
     }
 
     // MARK: - Debug
+
+    /// The window every chord acts on, for the self test alone.
+    ///
+    /// Nothing in the app sets it. `WindowSelfTest` installs it so that the
+    /// Carbon path can be driven against the probe window instead of whatever
+    /// the user has in front.
+    @ObservationIgnored var hotKeyTarget: (() -> WindowTarget?)?
+    /// The action of the last chord that reached `applyFromHotKey`, whether it
+    /// moved anything or not. The self test reads it to prove the Carbon
+    /// handler dispatched.
+    @ObservationIgnored private(set) var lastHotKeyAction: WindowAction?
+
+    /// Sends the Carbon hot key event of one action into the handler
+    /// `RegisterEventHotKey` feeds, exactly as a real press does. The self
+    /// test is the only caller; it returns nil when the action is not claimed.
+    @discardableResult
+    func dispatchHotKeyForSelfTest(_ action: WindowAction) -> OSStatus? {
+        lastHotKeyAction = nil
+        return hotKeys.sendRegisteredHotKey(for: action)
+    }
 
     /// Every binding of the chosen set with what the system said about it. The
     /// capture status file prints this, so a run can prove the conflict without

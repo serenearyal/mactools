@@ -60,6 +60,7 @@ func placed(_ action: WindowAction, gap: CGFloat, on screen: ScreenFrame = Scree
     arguments: [
         (WindowAction.leftHalf, rect(0, 0, 756, 949)),
         (.rightHalf, rect(756, 0, 756, 949)),
+        (.centerHalf, rect(378, 0, 756, 949)),
         (.topHalf, rect(0, 475, 1512, 474)),
         (.bottomHalf, rect(0, 0, 1512, 475)),
         (.topLeft, rect(0, 475, 756, 474)),
@@ -86,6 +87,7 @@ func placementsAtGapZero(action: WindowAction, expected: CGRect) {
     arguments: [
         (WindowAction.leftHalf, rect(8, 8, 744, 933)),
         (.rightHalf, rect(760, 8, 744, 933)),
+        (.centerHalf, rect(386, 8, 740, 933)),
         (.topHalf, rect(8, 479, 1496, 462)),
         (.bottomHalf, rect(8, 8, 1496, 463)),
         (.topLeft, rect(8, 479, 744, 462)),
@@ -112,6 +114,7 @@ func placementsAtGapEight(action: WindowAction, expected: CGRect) {
     arguments: [
         (WindowAction.leftHalf, rect(16, 16, 732, 917)),
         (.rightHalf, rect(764, 16, 732, 917)),
+        (.centerHalf, rect(394, 16, 724, 917)),
         (.topHalf, rect(16, 483, 1480, 450)),
         (.bottomHalf, rect(16, 16, 1480, 451)),
         (.topLeft, rect(16, 483, 732, 450)),
@@ -284,6 +287,23 @@ func portraitThirds() throws {
 func portraitHalves() throws {
     #expect(placed(.leftHalf, gap: 0, on: Screens.portrait) == rect(0, 0, 540, 1920))
     #expect(placed(.topHalf, gap: 0, on: Screens.portrait) == rect(0, 960, 1080, 960))
+    // Center Half follows the halves, not the thirds: a band down the middle
+    // on a portrait screen as much as on a landscape one.
+    #expect(placed(.centerHalf, gap: 0, on: Screens.portrait) == rect(270, 0, 540, 1920))
+}
+
+/// Center Half is the left half moved to the middle: the same width, centred
+/// on the screen, and it covers the inner halves of both side halves.
+@Test("center half is a half of the width in the middle", arguments: [0, 8, 16] as [CGFloat])
+func centerHalfIsCentred(gap: CGFloat) throws {
+    let left = try #require(placed(.leftHalf, gap: gap))
+    let center = try #require(placed(.centerHalf, gap: gap))
+    let maximized = try #require(placed(.maximize, gap: gap))
+    #expect(center.height == left.height)
+    // Both of its edges are internal, so it gives up half a gap on each side
+    // where the left half gives up half a gap on one.
+    #expect(abs(center.width - (left.width - gap / 2)) <= 1)
+    #expect(abs(center.midX - maximized.midX) <= 1)
 }
 
 @Test("two thirds run down a portrait screen too")

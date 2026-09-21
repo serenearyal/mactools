@@ -8,14 +8,68 @@ import WindowKit
 /// bundle, which has no Accessibility grant; these rules can.
 @Suite("window settings")
 struct WindowSettingsTests {
-    @Test("the shortcuts are off until the user picks a set")
-    func defaultsToOff() {
+    /// A feature that is off by default is a feature that does not work: the
+    /// shortcuts are Rectangle's out of the box.
+    @Test("the shortcuts are Rectangle's by default")
+    func defaultsToRectangle() {
         let data = WindowSettingsData()
-        #expect(data.shortcutChoice == .off)
-        #expect(data.shortcutChoice.set == nil)
+        #expect(data.shortcutChoice == .rectangle)
+        #expect(data.shortcutChoice.set?.id == "rectangle")
+        #expect(data.shortcutChoiceIsUserChoice == false)
         #expect(data.gap == 0)
         #expect(data.enhancedUserInterfaceWorkaround)
         #expect(data.reactivatesAfterTile)
+    }
+
+    /// The settings file of every build before this one says "off", because
+    /// that was the default and nobody chose it.
+    @Test("an off nobody chose becomes Rectangle's layout")
+    func migratesTheOldDefault() throws {
+        let stored = #"{"shortcutChoice":"off","disabledActions":[],"gap":12}"#
+        let data = try JSONDecoder().decode(WindowSettingsData.self, from: Data(stored.utf8))
+        #expect(data.shortcutChoice == .rectangle)
+        // Nothing else of the file is touched.
+        #expect(data.gap == 12)
+    }
+
+    @Test("an off the user chose is kept")
+    func keepsADeliberateOff() throws {
+        let stored = #"{"shortcutChoice":"off","shortcutChoiceIsUserChoice":true}"#
+        let data = try JSONDecoder().decode(WindowSettingsData.self, from: Data(stored.utf8))
+        #expect(data.shortcutChoice == .off)
+        #expect(data.shortcutChoice.set == nil)
+    }
+
+    @Test(
+        "a set the user chose is never migrated",
+        arguments: [WindowShortcutChoice.rectangle, .alternate]
+    )
+    func keepsAChosenSet(choice: WindowShortcutChoice) throws {
+        var data = WindowSettingsData()
+        data.shortcutChoice = choice
+        data.shortcutChoiceIsUserChoice = true
+        let encoded = try JSONEncoder().encode(data)
+        let decoded = try JSONDecoder().decode(WindowSettingsData.self, from: encoded)
+        #expect(decoded.shortcutChoice == choice)
+        #expect(decoded.shortcutChoiceIsUserChoice)
+    }
+
+    @Test("the migration is idempotent and only ever touches off")
+    func migrationIsPure() {
+        var data = WindowSettingsData()
+        data.shortcutChoice = .off
+        data.migrateShortcutChoice()
+        #expect(data.shortcutChoice == .rectangle)
+        data.migrateShortcutChoice()
+        #expect(data.shortcutChoice == .rectangle)
+        #expect(data.shortcutChoiceIsUserChoice == false)
+    }
+
+    /// A file written by a build that did not know this key at all.
+    @Test("a settings file with no window key at all gets the defaults")
+    func emptyObjectDecodes() throws {
+        let data = try JSONDecoder().decode(WindowSettingsData.self, from: Data("{}".utf8))
+        #expect(data == WindowSettingsData())
     }
 
     @Test("every action is on by default and can be switched off and back on")

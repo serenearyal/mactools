@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import SwiftUI
+import WindowKit
 
 /// The status item: a template image built from the live metrics, a left
 /// click that toggles the popover and a right click that opens a small menu.
@@ -60,9 +61,24 @@ final class StatusItemController: NSObject {
         return NSScreen.screens.contains { $0.frame.intersects(window.frame) }
     }
 
+    /// The Window submenu: the same command list the tab and the popover draw,
+    /// with the real key equivalents beside the names. It is rebuilt every
+    /// time it opens, because what a row may do depends on the window that was
+    /// in front and on how many displays are attached.
+    private lazy var windowMenu: NSMenu = {
+        let menu = NSMenu(title: "Window")
+        menu.delegate = self
+        menu.autoenablesItems = false
+        return menu
+    }()
+
     private lazy var contextMenu: NSMenu = {
         let menu = NSMenu()
         menu.addItem(item(title: "Open Vent", action: #selector(openWindow)))
+        menu.addItem(.separator())
+        let window = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
+        window.submenu = windowMenu
+        menu.addItem(window)
         menu.addItem(.separator())
         menu.addItem(item(title: "Fans: Full Blast", action: #selector(fansFullBlast)))
         menu.addItem(item(title: "Fans: Auto", action: #selector(fansAuto)))
@@ -286,6 +302,9 @@ final class StatusItemController: NSObject {
             // Handing the menu to the status item keeps the button
             // highlighted while the menu is open; a bare popUp does not.
             popoverController.close()
+            // Before the menu appears, while the user's own window is still
+            // the frontmost one: the Window submenu acts on that window.
+            AppServices.shared.windows.captureTarget()
             statusItem.menu = contextMenu
             statusItem.button?.performClick(nil)
             statusItem.menu = nil
@@ -331,5 +350,54 @@ final class StatusItemController: NSObject {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.target = self
         return item
+    }
+
+    // MARK: - The Window submenu
+
+    /// A row of the command list, as a menu item.
+    @objc private func performWindowAction(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let action = WindowAction(rawValue: raw)
+        else { return }
+        AppServices.shared.windows.apply(action, reactivate: true)
+    }
+}
+
+extension StatusItemController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === windowMenu else { return }
+        menu.removeAllItems()
+        let windows = AppServices.shared.windows
+        for (index, group) in windows.commandGroups.enumerated() {
+            if index > 0 { menu.addItem(.separator()) }
+            for row in group.rows {
+                menu.addItem(menuItem(for: row))
+            }
+        }
+        if !windows.accessibilityGranted {
+            menu.addItem(.separator())
+            menu.addItem(item(title: "Grant Accessibility...", action: #selector(grantAccessibility)))
+        }
+    }
+
+    private func menuItem(for row: WindowCommandRow) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: row.title,
+            action: #selector(performWindowAction(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = row.action.rawValue
+        item.isEnabled = row.isAvailable
+        item.image = WindowRegionImage.image(for: row.action)
+        if let binding = row.binding, let equivalent = WindowMenuKey.equivalent(for: binding) {
+            item.keyEquivalent = equivalent.key
+            item.keyEquivalentModifierMask = equivalent.modifiers
+        }
+        return item
+    }
+
+    @objc private func grantAccessibility() {
+        AppServices.shared.windows.requestAccessibility()
     }
 }

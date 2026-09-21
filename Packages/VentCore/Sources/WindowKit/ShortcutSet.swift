@@ -1,18 +1,19 @@
-/// A complete set of shortcuts: every action has exactly one chord.
+/// A complete set of shortcuts: one chord for an action, or none.
 ///
-/// Two sets ship. Rectangle owns ⌃⌥ on this machine, so the user can move
-/// Vent to the second set instead of quitting Rectangle, and no chord of the
-/// second set may then be one Rectangle holds.
+/// Two sets ship.
 ///
-/// Both sets come from one table: the same key for the same action, on two
-/// modifier tiers. The alternate set adds ⇧ to every chord, which is what
-/// makes the two sets disjoint by construction.
+/// `rectangle` is Rectangle's own default layout, key for key, as its menu
+/// prints it: ⌃⌥ for the tiles, ⌃⌥⇧↑ for Maximize Height, ⌃⌥⌘ for the two
+/// display moves, and no chord at all for Center Half and Almost Maximize.
+/// That is the set Vent registers out of the box, so a user who came from
+/// Rectangle presses what their fingers already know.
 ///
-/// One deviation from Rectangle's defaults: Rectangle puts Maximize Height on
-/// ⌃⌥⇧↑ and Almost Maximize on ⌃⌥⇧↩. Vent puts them on the ⌘ tier (⌃⌥⌘↑ and
-/// ⌃⌥⌘↩). On ⌃⌥⇧ they would sit exactly where the alternate set needs Top
-/// Half and Maximize, so the two sets would overlap on the two chords
-/// Rectangle already holds - the one thing the alternate set exists to avoid.
+/// `alternate` is for a Mac where another manager still runs and holds every
+/// one of those chords. It may not share a single chord with the first set,
+/// which rules out "the same keys with ⇧ added": ⌃⌥⇧↑ is Rectangle's own
+/// Maximize Height. So the alternate set adds ⇧ AND ⌘ to the tiles, and moves
+/// the three chords that would then collide with a tile onto ⌃⇧⌘, which
+/// carries no ⌥ and therefore cannot touch the first set either.
 public struct ShortcutSet: Sendable, Equatable, Hashable, Codable, Identifiable {
     public let id: String
     public let name: String
@@ -32,7 +33,11 @@ public struct ShortcutSet: Sendable, Equatable, Hashable, Codable, Identifiable 
         Set(bindings.map(\.chord))
     }
 
-    /// Rectangle's own layout: ⌃⌥ for the tiles, ⌃⌥⌘ for the extras.
+    /// The actions Rectangle ships without a default chord. They are on every
+    /// list and in every menu; only the key column is empty.
+    public static let unbound: Set<WindowAction> = [.centerHalf, .almostMaximize]
+
+    /// Rectangle's own layout, exactly as its menu prints it.
     public static let rectangle = ShortcutSet(
         id: "rectangle",
         name: "Rectangle",
@@ -40,12 +45,12 @@ public struct ShortcutSet: Sendable, Equatable, Hashable, Codable, Identifiable 
             HotKeyBinding(
                 action: entry.action,
                 keyCode: entry.keyCode,
-                modifiers: entry.tier == .base ? [.control, .option] : [.control, .option, .command]
+                modifiers: entry.tier.rectangleModifiers
             )
         }
     )
 
-    /// The same table with ⇧ added, for a Mac where another app holds ⌃⌥.
+    /// The same keys one tier up, for a Mac where another app owns ⌃⌥.
     public static let alternate = ShortcutSet(
         id: "alternate",
         name: "Alternate",
@@ -53,18 +58,40 @@ public struct ShortcutSet: Sendable, Equatable, Hashable, Codable, Identifiable 
             HotKeyBinding(
                 action: entry.action,
                 keyCode: entry.keyCode,
-                modifiers: entry.tier == .base
-                    ? [.control, .option, .shift]
-                    : [.control, .option, .shift, .command]
+                modifiers: entry.tier.alternateModifiers
             )
         }
     )
 
     public static let all: [ShortcutSet] = [.rectangle, .alternate]
 
+    /// The three modifier tiers of Rectangle's defaults, and what the
+    /// alternate set puts in their place.
     enum Tier: Sendable {
-        case base
-        case extra
+        /// ⌃⌥: every tile.
+        case tile
+        /// ⌃⌥⇧: Maximize Height, on its own.
+        case shift
+        /// ⌃⌥⌘: the two display moves.
+        case command
+
+        var rectangleModifiers: HotKeyModifiers {
+            switch self {
+            case .tile: [.control, .option]
+            case .shift: [.control, .option, .shift]
+            case .command: [.control, .option, .command]
+            }
+        }
+
+        /// The tiles gain ⇧ and ⌘. The other two tiers would then land on a
+        /// tile of their own set (↑ is Top Half, ← and → are the side halves),
+        /// so they drop ⌥ instead: no chord of the first set is without it.
+        var alternateModifiers: HotKeyModifiers {
+            switch self {
+            case .tile: [.control, .option, .shift, .command]
+            case .shift, .command: [.control, .shift, .command]
+            }
+        }
     }
 
     struct LayoutEntry: Sendable {
@@ -73,29 +100,31 @@ public struct ShortcutSet: Sendable, Equatable, Hashable, Codable, Identifiable 
         let tier: Tier
     }
 
-    /// The key of every action, once. Both sets read it.
+    /// The key of every action that has one, once. Both sets read it.
+    ///
+    /// The order is the order of Rectangle's menu, which is the order the
+    /// command list draws.
     static let layout: [LayoutEntry] = [
-        LayoutEntry(action: .leftHalf, keyCode: KeyCode.left, tier: .base),
-        LayoutEntry(action: .rightHalf, keyCode: KeyCode.right, tier: .base),
-        LayoutEntry(action: .topHalf, keyCode: KeyCode.up, tier: .base),
-        LayoutEntry(action: .bottomHalf, keyCode: KeyCode.down, tier: .base),
-        LayoutEntry(action: .topLeft, keyCode: KeyCode.u, tier: .base),
-        LayoutEntry(action: .topRight, keyCode: KeyCode.i, tier: .base),
-        LayoutEntry(action: .bottomLeft, keyCode: KeyCode.j, tier: .base),
-        LayoutEntry(action: .bottomRight, keyCode: KeyCode.k, tier: .base),
-        LayoutEntry(action: .maximize, keyCode: KeyCode.returnKey, tier: .base),
-        LayoutEntry(action: .center, keyCode: KeyCode.c, tier: .base),
-        LayoutEntry(action: .firstThird, keyCode: KeyCode.d, tier: .base),
-        LayoutEntry(action: .centerThird, keyCode: KeyCode.f, tier: .base),
-        LayoutEntry(action: .lastThird, keyCode: KeyCode.g, tier: .base),
-        LayoutEntry(action: .firstTwoThirds, keyCode: KeyCode.e, tier: .base),
-        LayoutEntry(action: .lastTwoThirds, keyCode: KeyCode.t, tier: .base),
-        LayoutEntry(action: .restore, keyCode: KeyCode.delete, tier: .base),
-        LayoutEntry(action: .smaller, keyCode: KeyCode.minus, tier: .base),
-        LayoutEntry(action: .larger, keyCode: KeyCode.equal, tier: .base),
-        LayoutEntry(action: .previousDisplay, keyCode: KeyCode.left, tier: .extra),
-        LayoutEntry(action: .nextDisplay, keyCode: KeyCode.right, tier: .extra),
-        LayoutEntry(action: .maximizeHeight, keyCode: KeyCode.up, tier: .extra),
-        LayoutEntry(action: .almostMaximize, keyCode: KeyCode.returnKey, tier: .extra),
+        LayoutEntry(action: .leftHalf, keyCode: KeyCode.left, tier: .tile),
+        LayoutEntry(action: .rightHalf, keyCode: KeyCode.right, tier: .tile),
+        LayoutEntry(action: .topHalf, keyCode: KeyCode.up, tier: .tile),
+        LayoutEntry(action: .bottomHalf, keyCode: KeyCode.down, tier: .tile),
+        LayoutEntry(action: .topLeft, keyCode: KeyCode.u, tier: .tile),
+        LayoutEntry(action: .topRight, keyCode: KeyCode.i, tier: .tile),
+        LayoutEntry(action: .bottomLeft, keyCode: KeyCode.j, tier: .tile),
+        LayoutEntry(action: .bottomRight, keyCode: KeyCode.k, tier: .tile),
+        LayoutEntry(action: .firstThird, keyCode: KeyCode.d, tier: .tile),
+        LayoutEntry(action: .centerThird, keyCode: KeyCode.f, tier: .tile),
+        LayoutEntry(action: .lastThird, keyCode: KeyCode.g, tier: .tile),
+        LayoutEntry(action: .firstTwoThirds, keyCode: KeyCode.e, tier: .tile),
+        LayoutEntry(action: .lastTwoThirds, keyCode: KeyCode.t, tier: .tile),
+        LayoutEntry(action: .maximize, keyCode: KeyCode.returnKey, tier: .tile),
+        LayoutEntry(action: .maximizeHeight, keyCode: KeyCode.up, tier: .shift),
+        LayoutEntry(action: .smaller, keyCode: KeyCode.minus, tier: .tile),
+        LayoutEntry(action: .larger, keyCode: KeyCode.equal, tier: .tile),
+        LayoutEntry(action: .center, keyCode: KeyCode.c, tier: .tile),
+        LayoutEntry(action: .restore, keyCode: KeyCode.delete, tier: .tile),
+        LayoutEntry(action: .nextDisplay, keyCode: KeyCode.right, tier: .command),
+        LayoutEntry(action: .previousDisplay, keyCode: KeyCode.left, tier: .command),
     ]
 }
