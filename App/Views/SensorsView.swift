@@ -83,6 +83,10 @@ struct SensorsView: View {
             TableColumn("History") { trace in
                 Sparkline(values: Array(trace.values), minimumRange: 2)
                     .frame(height: 18)
+                    // The last column takes whatever is left, and the trace
+                    // ran into the right edge of the window. Every other
+                    // column keeps its distance; so does this one now.
+                    .padding(.trailing, Layout.gutter)
             }
             .width(min: 50, ideal: 60)
         } rows: {

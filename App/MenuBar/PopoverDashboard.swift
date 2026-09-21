@@ -20,13 +20,19 @@ struct PopoverDashboard: View {
     /// whole snapshot here would make every section depend on every number.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            section { CPUSection(store: store, open: open) }
+            section(height: PopoverLayout.DashboardHeight.cpu) {
+                CPUSection(store: store, open: open)
+            }
             Divider()
-            section { MemorySection(store: store, open: open) }
+            section(height: PopoverLayout.DashboardHeight.memory) {
+                MemorySection(store: store, open: open)
+            }
             Divider()
-            section { StorageSection(store: store, open: open) }
+            section(height: PopoverLayout.DashboardHeight.storage) {
+                StorageSection(store: store, open: open)
+            }
             Divider()
-            section {
+            section(height: PopoverLayout.DashboardHeight.thermals) {
                 ThermalSection(
                     store: store,
                     fans: services.fans,
@@ -37,17 +43,26 @@ struct PopoverDashboard: View {
                 )
             }
             Divider()
-            section { ProcessSection(processes: services.processes, reports: services.reports, open: open) }
+            section(height: PopoverLayout.DashboardHeight.processes) {
+                ProcessSection(processes: services.processes, reports: services.reports, open: open)
+            }
         }
     }
 
-    /// The padding every section shares. Each section stacks its own rows, so
-    /// the spacing inside a section stays that section's business.
-    private func section<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    /// The padding every section shares, and the size none of them may change.
+    ///
+    /// Both axes are fixed, which is what stops one section's new number from
+    /// costing a measurement of the section under it and of the panel around
+    /// it. Each section stacks its own rows, so the spacing inside a section
+    /// stays that section's business.
+    private func section<Content: View>(
+        height: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         content()
             .padding(.horizontal, PopoverLayout.padding)
             .padding(.vertical, PopoverLayout.sectionSpacing)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: PopoverLayout.width, height: height, alignment: .topLeading)
     }
 }
 
@@ -76,9 +91,13 @@ private struct CPUSection: View {
                 CoreGroup(tag: "E", loads: loads(of: .efficiency), tint: .accentColor.opacity(0.55))
                 CoreGroup(tag: "P", loads: loads(of: .performance), tint: .accentColor)
                 Spacer(minLength: PopoverLayout.rowSpacing)
+                // Both boxes are as wide as the widest value they can hold, so
+                // a load going from 9 % to 10 % moves nothing beside it.
                 HStack(spacing: PopoverLayout.rowSpacing) {
                     Text("user \(Fmt.percent(cpu?.total.user ?? 0, fractionDigits: 1))")
+                        .frame(width: 66, alignment: .trailing)
                     Text("sys \(Fmt.percent(cpu?.total.system ?? 0, fractionDigits: 1))")
+                        .frame(width: 60, alignment: .trailing)
                 }
                 .font(.caption)
                 .monospacedDigit()
@@ -102,36 +121,66 @@ private struct CPUSection: View {
     }
 }
 
+/// One cluster: its letter, and a bar per core.
+///
+/// The bars are one `Canvas` rather than a stack of shapes. A ten-core Mac
+/// draws ten bars and ten overlays here on every sample, and each one was a
+/// view of its own to lay out and invalidate; the drawing is two rounded
+/// rectangles a core, so it is cheaper to draw it than to describe it.
 private struct CoreGroup: View {
     let tag: String
     let loads: [Double]
     let tint: Color
 
+    private static let barWidth: CGFloat = 6
+    private static let barSpacing: CGFloat = 3
+    private static let barHeight: CGFloat = 22
+    private static let cornerRadius: CGFloat = 1.5
+
     var body: some View {
-        HStack(alignment: .bottom, spacing: 3) {
+        HStack(alignment: .bottom, spacing: CoreGroup.barSpacing) {
             Text(tag)
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)
-            ForEach(Array(loads.enumerated()), id: \.offset) { _, load in
-                CoreBar(percent: load, tint: tint)
+            Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+                draw(in: context, size: size)
             }
+            .frame(width: width, height: CoreGroup.barHeight)
+            .allowsHitTesting(false)
         }
     }
-}
 
-private struct CoreBar: View {
-    let percent: Double
-    let tint: Color
+    private var width: CGFloat {
+        guard !loads.isEmpty else { return 0 }
+        return CGFloat(loads.count) * CoreGroup.barWidth
+            + CGFloat(loads.count - 1) * CoreGroup.barSpacing
+    }
 
-    var body: some View {
-        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-            .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.5))
-            .frame(width: 6, height: 22)
-            .overlay(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(tint)
-                    .frame(height: max(1, 22 * percent.clamped(to: 0...100) / 100))
-            }
+    private func draw(in context: GraphicsContext, size: CGSize) {
+        let track = Color(nsColor: .quaternaryLabelColor).opacity(0.5)
+        for (index, load) in loads.enumerated() {
+            let x = CGFloat(index) * (CoreGroup.barWidth + CoreGroup.barSpacing)
+            context.fill(
+                bar(x: x, height: size.height, in: size),
+                with: .color(track)
+            )
+            let filled = max(1, size.height * load.clamped(to: 0...100) / 100)
+            context.fill(bar(x: x, height: filled, in: size), with: .color(tint))
+        }
+    }
+
+    /// One bar, grown from the bottom edge like the rectangle it replaces.
+    private func bar(x: CGFloat, height: CGFloat, in size: CGSize) -> Path {
+        Path(
+            roundedRect: CGRect(
+                x: x,
+                y: size.height - height,
+                width: CoreGroup.barWidth,
+                height: height
+            ),
+            cornerRadius: CoreGroup.cornerRadius,
+            style: .continuous
+        )
     }
 }
 
@@ -156,6 +205,7 @@ private struct MemorySection: View {
                 Text(usage)
                     .font(.callout.weight(.medium))
                     .monospacedDigit()
+                    .frame(width: 146, alignment: .trailing)
                 Image(systemName: "circle.fill")
                     .font(.system(size: 7))
                     .foregroundStyle(MetricColor.pressure(memory?.pressure))
@@ -176,12 +226,16 @@ private struct MemorySection: View {
             HStack(spacing: PopoverLayout.rowSpacing) {
                 Text("\(pressure) pressure")
                 Spacer(minLength: PopoverLayout.rowSpacing)
+                // Fixed boxes again: free and swap move all the time, and the
+                // line they sit in must not breathe with them.
                 Text(memory.map { "\(Fmt.memorySize($0.free)) free" } ?? "--")
                     .monospacedDigit()
+                    .frame(width: 72, alignment: .trailing)
                 Text("·")
                     .foregroundStyle(.tertiary)
                 Text(memory.map { "\(Fmt.memorySize($0.swap.used)) swap" } ?? "--")
                     .monospacedDigit()
+                    .frame(width: 82, alignment: .trailing)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -219,6 +273,7 @@ private struct StorageSection: View {
                 Text(usage)
                     .font(.callout.weight(.medium))
                     .monospacedDigit()
+                    .frame(width: 218, alignment: .trailing)
             }
 
             SegmentedBar(
@@ -236,6 +291,7 @@ private struct StorageSection: View {
             HStack(spacing: PopoverLayout.rowSpacing) {
                 Text(volume.map { "\(Fmt.storageSize($0.available)) free" } ?? "--")
                     .monospacedDigit()
+                    .frame(width: 96, alignment: .leading)
                 Spacer(minLength: PopoverLayout.rowSpacing)
                 Label(
                     Fmt.throughput(store.diskIO?.bytesReadPerSecond ?? 0),
@@ -279,12 +335,22 @@ private struct ThermalSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PopoverLayout.rowSpacing) {
-            content
+            titleRow
+            statsRow
+            // One slot, one height, two possible contents: the fans, or the
+            // line that says why they cannot be commanded. See
+            // `PopoverLayout.DashboardHeight.fanSlot`.
+            fanSlot
+                .frame(
+                    width: PopoverLayout.width - PopoverLayout.padding * 2,
+                    height: PopoverLayout.DashboardHeight.fanSlot,
+                    alignment: .topLeading
+                )
+            buttons
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
+    private var titleRow: some View {
         HStack(spacing: PopoverLayout.rowSpacing) {
             PopoverSectionTitle(
                 title: "Thermals & Fans",
@@ -300,7 +366,9 @@ private struct ThermalSection: View {
                     .help("A die above 100 °C: every fan is back on Auto")
             }
         }
+    }
 
+    private var statsRow: some View {
         HStack(alignment: .top, spacing: PopoverLayout.rowSpacing) {
             PopoverStat(
                 caption: "CPU",
@@ -317,23 +385,76 @@ private struct ThermalSection: View {
                 value: store.systemPower.map { Fmt.watts($0.watts) } ?? "--"
             )
         }
+    }
 
-        // Two at most: the popover keeps one height, and a Mac with more fans
-        // has them all on the Fans tab.
-        ForEach(fanRows.prefix(2), id: \.index) { row in
-            HStack(spacing: PopoverLayout.rowSpacing) {
-                Text(row.name)
-                    .foregroundStyle(.secondary)
-                Text(row.mode)
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: PopoverLayout.rowSpacing)
-                Text(row.rpm)
-                    .monospacedDigit()
-                    .frame(width: 72, alignment: .trailing)
+    /// The fans, or the one thing Vent has to say about them.
+    ///
+    /// They share a slot because they are the same answer to the same
+    /// question. A Mac whose helper is missing or is the wrong build cannot be
+    /// told what to do with its fans, and the line that says so belongs where
+    /// the reader is already looking - not under the buttons, where it used to
+    /// push the Top Processes section off the bottom of the panel.
+    @ViewBuilder
+    private var fanSlot: some View {
+        if let hint = stateHint {
+            HStack(alignment: .top, spacing: PopoverLayout.rowSpacing) {
+                PopoverHint(text: hint.text, tint: hint.tint)
+                    .lineLimit(2)
+                if hint.opensSettings {
+                    Button("Open Settings") { open(.settings) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .fixedSize()
+                }
             }
-            .font(.caption)
+        } else {
+            // Two at most: the popover keeps one height, and a Mac with more
+            // fans has them all on the Fans tab.
+            VStack(alignment: .leading, spacing: PopoverLayout.rowSpacing) {
+                ForEach(fanRows.prefix(2), id: \.index) { row in
+                    HStack(spacing: PopoverLayout.rowSpacing) {
+                        Text(row.name)
+                            .foregroundStyle(.secondary)
+                        Text(row.mode)
+                            .foregroundStyle(.tertiary)
+                        Spacer(minLength: PopoverLayout.rowSpacing)
+                        Text(row.rpm)
+                            .monospacedDigit()
+                            .frame(width: 72, alignment: .trailing)
+                    }
+                    .font(.caption)
+                }
+            }
         }
+    }
 
+    /// In this order: the helper is the wrong build, then the last command was
+    /// refused, then there is no helper at all. A refused command is invisible
+    /// anywhere else in the popover.
+    private var stateHint: FanStateHint? {
+        if let mismatch = helper.mismatchMessage {
+            return FanStateHint(text: mismatch, tint: .red, opensSettings: true)
+        }
+        if let refusal = fans.lastCommandFailure {
+            return FanStateHint(text: refusal, tint: .red, opensSettings: false)
+        }
+        if !fans.isAvailable {
+            return FanStateHint(
+                text: "Fan control needs the privileged helper.",
+                tint: .secondary,
+                opensSettings: false
+            )
+        }
+        return nil
+    }
+
+    private struct FanStateHint {
+        let text: String
+        let tint: Color
+        let opensSettings: Bool
+    }
+
+    private var buttons: some View {
         HStack(spacing: PopoverLayout.rowSpacing) {
             Button(action: actions.startAuto) {
                 Text("Auto").frame(maxWidth: .infinity)
@@ -347,20 +468,6 @@ private struct ThermalSection: View {
         .buttonStyle(.bordered)
         .controlSize(.regular)
         .disabled(!fans.isAvailable)
-
-        // One line under the buttons, in this order: the helper is the wrong
-        // build, then the last command was refused, then no helper at all. A
-        // refused command is invisible anywhere else in the popover.
-        if let mismatch = helper.mismatchMessage {
-            PopoverHint(text: mismatch, tint: .red)
-            Button("Open Settings") { open(.settings) }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-        } else if let refusal = fans.lastCommandFailure {
-            PopoverHint(text: refusal, tint: .red)
-        } else if !fans.isAvailable {
-            PopoverHint(text: "Fan control needs the privileged helper.")
-        }
     }
 
     private func temperature(_ reading: TemperatureReading?) -> String {

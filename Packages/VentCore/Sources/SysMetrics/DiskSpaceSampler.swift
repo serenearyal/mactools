@@ -49,6 +49,36 @@ public struct VolumeInfo: Sendable, Equatable, Codable, Identifiable {
     }
 
     public var usedFraction: Double { total > 0 ? Double(used) / Double(total) : 0 }
+
+    /// How much of `available` is purgeable: what the system would throw away
+    /// for a download, over and above the free blocks `df` counts.
+    public var purgeableBonus: Int64 {
+        Int64(bitPattern: available) - Int64(bitPattern: availableRaw)
+    }
+
+    /// The same volume with the purgeable share added back.
+    ///
+    /// A pass that skipped the expensive key has the raw free space and
+    /// nothing else; this puts the last purgeable estimate back on top of a
+    /// fresh `statfs` number, so the free space still moves with every write
+    /// while the slow part of it is only re-read now and then.
+    public func addingPurgeableBonus(_ bonus: Int64) -> VolumeInfo {
+        let sum = Int64(bitPattern: availableRaw) + bonus
+        let capped = UInt64(max(0, min(sum, Int64(bitPattern: total))))
+        return VolumeInfo(
+            name: name,
+            mountPath: mountPath,
+            total: total,
+            available: capped,
+            availableRaw: availableRaw,
+            used: total > capped ? total - capped : 0,
+            isInternal: isInternal,
+            isRemovable: isRemovable,
+            isBootVolume: isBootVolume,
+            fileSystemType: fileSystemType,
+            device: device
+        )
+    }
 }
 
 /// Mounted volumes with their capacity.
@@ -59,29 +89,45 @@ public struct VolumeInfo: Sendable, Equatable, Codable, Identifiable {
 /// the other container volumes together. That is the "384 GB of 494 GB" a
 /// user expects, not the 12 GB of the read-only system volume alone.
 public enum DiskSpaceSampler {
+    /// The cheap keys. Every one of them comes out of the `statfs` the URL
+    /// machinery has already done.
     static let resourceKeys: [URLResourceKey] = [
         .volumeNameKey,
         .volumeTotalCapacityKey,
         .volumeAvailableCapacityKey,
-        .volumeAvailableCapacityForImportantUsageKey,
         .volumeIsInternalKey,
         .volumeIsRemovableKey,
         .volumeIsRootFileSystemKey,
     ]
 
-    public static func sample() -> [VolumeInfo] {
+    /// The expensive one.
+    ///
+    /// `volumeAvailableCapacityForImportantUsage` asks `cache_delete` how much
+    /// it could free, and that answer costs a volume validation through IOKit
+    /// per mount point - more than everything else one pass reads, together.
+    /// It is the number Finder shows, so it stays; `includingPurgeableSpace`
+    /// is how a caller that reads every few seconds leaves it out and puts the
+    /// last value back with `addingPurgeableBonus`.
+    static let purgeableKey: URLResourceKey = .volumeAvailableCapacityForImportantUsageKey
+
+    public static func sample(includingPurgeableSpace: Bool = true) -> [VolumeInfo] {
+        let keys = includingPurgeableSpace ? resourceKeys + [purgeableKey] : resourceKeys
         let urls = FileManager.default.mountedVolumeURLs(
-            includingResourceValuesForKeys: resourceKeys,
+            includingResourceValuesForKeys: keys,
             options: [.skipHiddenVolumes]
         ) ?? []
-        return urls.compactMap(info(for:)).sorted { lhs, rhs in
-            if lhs.isBootVolume != rhs.isBootVolume { return lhs.isBootVolume }
-            return lhs.mountPath < rhs.mountPath
-        }
+        return urls
+            .compactMap { info(for: $0, includingPurgeableSpace: includingPurgeableSpace) }
+            .sorted { lhs, rhs in
+                if lhs.isBootVolume != rhs.isBootVolume { return lhs.isBootVolume }
+                return lhs.mountPath < rhs.mountPath
+            }
     }
 
-    public static func info(for url: URL) -> VolumeInfo? {
-        guard let values = try? url.resourceValues(forKeys: Set(resourceKeys)),
+    public static func info(for url: URL, includingPurgeableSpace: Bool = true) -> VolumeInfo? {
+        var keys = Set(resourceKeys)
+        if includingPurgeableSpace { keys.insert(purgeableKey) }
+        guard let values = try? url.resourceValues(forKeys: keys),
               let total = values.volumeTotalCapacity, total > 0
         else { return nil }
 

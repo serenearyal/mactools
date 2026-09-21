@@ -11,6 +11,10 @@ enum Layout {
     /// about 708 pt wide. Below that the cards stack.
     static let minimumCardWidth: CGFloat = 320
     static let twoColumnWidth = minimumCardWidth * 2 + cardSpacing * 3
+    /// The ideal width of the sidebar, which is what the split view gives it
+    /// at every window size the layout allows. The capture path subtracts it
+    /// to render one tab at the size it really has.
+    static let sidebarWidth: CGFloat = 192
 }
 
 /// A panel with a title line and a hairline border, the way the system
@@ -105,20 +109,34 @@ struct SegmentedBar: View {
     let total: Double
     var height: CGFloat = 10
 
+    /// One `Canvas`, not a `GeometryReader` over a stack of rectangles.
+    ///
+    /// The bar is on the two popover sections that redraw with every sample,
+    /// and a `GeometryReader` there hands its own size back into the layout
+    /// and builds a view per segment for a drawing that is four rectangles.
+    /// The canvas is the same pixels for one draw call and no layout at all.
     var body: some View {
-        GeometryReader { proxy in
-            HStack(spacing: 1) {
-                ForEach(segments) { segment in
-                    Rectangle()
-                        .fill(segment.style)
-                        .frame(width: width(of: segment, in: proxy.size.width))
+        Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+            var x: CGFloat = 0
+            for segment in segments {
+                let width = self.width(of: segment, in: size.width)
+                if width > 0 {
+                    context.fill(
+                        Path(CGRect(x: x, y: 0, width: width, height: size.height)),
+                        with: .style(segment.style)
+                    )
                 }
-                Rectangle()
-                    .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.5))
+                // The 1 pt gap between two parts, the way the stack drew it.
+                x += width + 1
             }
+            context.fill(
+                Path(CGRect(x: x, y: 0, width: max(0, size.width - x), height: size.height)),
+                with: .color(Color(nsColor: .quaternaryLabelColor).opacity(0.5))
+            )
         }
         .frame(height: height)
         .clipShape(Capsule())
+        .allowsHitTesting(false)
     }
 
     private func width(of segment: Segment, in available: CGFloat) -> CGFloat {

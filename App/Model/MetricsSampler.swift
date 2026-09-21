@@ -26,6 +26,14 @@ actor MetricsSampler {
     /// time with the layout. nil when it has none.
     private var fanModeSuffix: String?
     private var catalogTemperatureKeys: [SMCFourCC]?
+    /// The purgeable share of the free space, per mount point, and when it was
+    /// last read. See `volumes()`.
+    private var purgeableBonus: [String: Int64] = [:]
+    private var purgeableDate = Date.distantPast
+    /// A minute. The purgeable space is an estimate of what the system would
+    /// throw away under pressure; it moves in gigabytes over hours, and an
+    /// hour-old number is still the right one to draw.
+    private static let purgeableInterval: TimeInterval = 60
 
     var topology: CoreTopology { cpuSampler.topology }
 
@@ -39,7 +47,7 @@ actor MetricsSampler {
             sample.memory = try? MemorySampler.sample()
         }
         if request.diskSpace {
-            sample.volumes = DiskSpaceSampler.sample()
+            sample.volumes = volumes()
         }
         if request.diskIO {
             sample.diskIO = (try? diskIOSampler.sample())?.rates
@@ -60,6 +68,34 @@ actor MetricsSampler {
             }
         }
         return sample
+    }
+
+    // MARK: - Disks
+
+    /// The mounted volumes, with the expensive part of the answer read once a
+    /// minute.
+    ///
+    /// "Available" on a Mac is the free blocks plus whatever the system would
+    /// purge for you, and that second half is a round trip to `cache_delete`
+    /// that validates every volume through IOKit - it was the most expensive
+    /// thing in a pass with the popover open. The free blocks are read every
+    /// time, because a download has to show up at once; the purgeable share on
+    /// top of them is carried over from the last full read.
+    private func volumes() -> [VolumeInfo] {
+        let now = Date.now
+        if now.timeIntervalSince(purgeableDate) >= MetricsSampler.purgeableInterval {
+            purgeableDate = now
+            let full = DiskSpaceSampler.sample()
+            purgeableBonus = Dictionary(
+                full.map { ($0.mountPath, $0.purgeableBonus) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            return full
+        }
+        return DiskSpaceSampler.sample(includingPurgeableSpace: false).map { volume in
+            guard let bonus = purgeableBonus[volume.mountPath] else { return volume }
+            return volume.addingPurgeableBonus(bonus)
+        }
     }
 
     // MARK: - SMC

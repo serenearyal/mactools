@@ -141,12 +141,44 @@ public enum ProcessCPUMath {
 /// a `Mutex`. The libproc calls are synchronous, one per process, a few
 /// milliseconds for the whole table.
 public final class ProcessSampler: Sendable {
+    /// What the last pass knew about one pid.
+    ///
+    /// The CPU counter is what the next percentage is measured against. The
+    /// path and the name beside it are a cache: `proc_pidpath` resolves a
+    /// vnode path for every one of about 580 processes, it was the most
+    /// expensive call in a pass, and the executable of a running process
+    /// never changes. The start time and the command are what say whether this
+    /// is still the same process: a reused pid gets a fresh lookup.
+    struct CachedProcess: Sendable {
+        var cpu: ProcessCPUSample?
+        var command: String
+        var startAbsoluteTime: UInt64?
+        var path: String?
+        var name: String
+    }
+
     private let timebase: MachTimebase
-    private let previous: Mutex<[Int32: ProcessCPUSample]>
+    private let previous: Mutex<[Int32: CachedProcess]>
 
     public init(timebase: MachTimebase = .current) {
         self.timebase = timebase
         previous = Mutex([:])
+    }
+
+    /// The cached path and name, when the cache is still about this process.
+    ///
+    /// Pure, so the one rule that matters - a pid the kernel handed to another
+    /// process must not inherit its name - is tested rather than assumed.
+    static func reusableIdentity(
+        cached: CachedProcess?,
+        command: String,
+        startAbsoluteTime: UInt64?
+    ) -> (path: String?, name: String)? {
+        guard let cached,
+              cached.command == command,
+              cached.startAbsoluteTime == startAbsoluteTime
+        else { return nil }
+        return (cached.path, cached.name)
     }
 
     /// Every process the kernel lists. Rows whose counters are refused keep
@@ -157,16 +189,34 @@ public final class ProcessSampler: Sendable {
 
         var rows: [ProcessInfoRow] = []
         rows.reserveCapacity(pids.count)
-        var live: [Int32: ProcessCPUSample] = [:]
+        var live: [Int32: CachedProcess] = [:]
         live.reserveCapacity(pids.count)
 
         previous.withLock { history in
             for pid in pids {
                 guard let identity = ProcessSampler.identity(of: pid) else { continue }
-                let path = ProcessSampler.executablePath(of: pid)
-                let name = ProcessSampler.displayName(executablePath: path, command: identity.command)
+                let usage = ProcessSampler.resourceUsage(of: pid)
+                let start = usage?.ri_proc_start_abstime
 
-                guard let usage = ProcessSampler.resourceUsage(of: pid) else {
+                // The one lookup a pass can skip: the executable of a process
+                // that is still the one the last pass saw.
+                let cached = ProcessSampler.reusableIdentity(
+                    cached: history[pid],
+                    command: identity.command,
+                    startAbsoluteTime: start
+                )
+                let path = cached?.path ?? ProcessSampler.executablePath(of: pid)
+                let name = cached?.name
+                    ?? ProcessSampler.displayName(executablePath: path, command: identity.command)
+
+                guard let usage else {
+                    live[pid] = CachedProcess(
+                        cpu: nil,
+                        command: identity.command,
+                        startAbsoluteTime: nil,
+                        path: path,
+                        name: name
+                    )
                     rows.append(
                         ProcessInfoRow(
                             pid: pid,
@@ -192,7 +242,13 @@ public final class ProcessSampler: Sendable {
                     wallNanoseconds: wall,
                     startAbsoluteTime: usage.ri_proc_start_abstime
                 )
-                live[pid] = current
+                live[pid] = CachedProcess(
+                    cpu: current,
+                    command: identity.command,
+                    startAbsoluteTime: start,
+                    path: path,
+                    name: name
+                )
                 rows.append(
                     ProcessInfoRow(
                         pid: pid,
@@ -202,7 +258,10 @@ public final class ProcessSampler: Sendable {
                         name: name,
                         executablePath: path,
                         startAbsoluteTime: usage.ri_proc_start_abstime,
-                        cpuPercent: ProcessCPUMath.percent(previous: history[pid], current: current),
+                        cpuPercent: ProcessCPUMath.percent(
+                            previous: history[pid]?.cpu,
+                            current: current
+                        ),
                         cpuNanoseconds: cpu,
                         memoryBytes: usage.ri_phys_footprint
                     )

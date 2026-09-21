@@ -45,7 +45,7 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
         // the same height, so this one is exact.
         popover.contentSize = CGSize(
             width: PopoverLayout.width,
-            height: PopoverLayout.contentHeight + PopoverLayout.chromeHeight
+            height: PopoverLayout.panelHeight
         )
     }
 
@@ -129,7 +129,7 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
         host.sizingOptions = [.preferredContentSize]
         let size = CGSize(
             width: PopoverLayout.width,
-            height: PopoverLayout.contentHeight + PopoverLayout.chromeHeight
+            height: PopoverLayout.panelHeight
         )
         let window = NSWindow(
             contentRect: CGRect(origin: .zero, size: size),

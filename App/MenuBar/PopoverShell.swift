@@ -48,16 +48,17 @@ struct MenuBarPopoverView: View {
             Divider()
             content
                 .frame(
-                    maxWidth: .infinity,
-                    minHeight: PopoverLayout.contentHeight,
-                    maxHeight: PopoverLayout.contentHeight,
+                    width: PopoverLayout.width,
+                    height: PopoverLayout.contentHeight,
                     alignment: .top
                 )
                 .clipped()
         }
-        .frame(width: PopoverLayout.width, alignment: .leading)
-        .frame(maxHeight: PopoverLayout.maximumHeight)
-        .fixedSize(horizontal: false, vertical: true)
+        // Both axes fixed, and nothing inside asks to be measured against the
+        // content: the hosting view reports the same preferred size on every
+        // update, so a sample never costs a layout pass over the whole panel.
+        // `PopoverLayout.DashboardHeight` has the arithmetic.
+        .frame(width: PopoverLayout.width, height: PopoverLayout.panelHeight, alignment: .top)
         // The popover takes the key window, and SwiftUI would draw a focus
         // ring around the first button of a panel nobody is tabbing through.
         .focusEffectDisabled()

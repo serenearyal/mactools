@@ -136,7 +136,7 @@ private struct CPUCard: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.3))
                 .overlay {
-                    Text("Sampling...")
+                    Text("Sampling…")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -370,7 +370,7 @@ private struct ThermalsCard: View {
 private struct CardPlaceholder: View {
     var body: some View {
         HStack {
-            Text("Sampling...")
+            Text("Sampling…")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()

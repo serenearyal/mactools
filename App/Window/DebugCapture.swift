@@ -42,6 +42,7 @@ enum DebugCapture {
             captureDetail(
                 services: services,
                 dark: suffix == "dark",
+                size: detailSize(services: services),
                 to: base.appending(path: "detail-\(tab)-\(suffix).png")
             )
             // The Windows section draws the window that was in front, and the
@@ -265,9 +266,28 @@ enum DebugCapture {
         write(rep, to: url)
     }
 
-    /// The detail pane on its own, drawn by `ImageRenderer` at the size it
-    /// has in a 900 x 600 window.
-    private static func captureDetail(services: AppServices, dark: Bool, to url: URL) {
+    /// The size the detail pane really has right now: the content of the
+    /// window less the sidebar and the title bar.
+    ///
+    /// It follows `--window-size`, so the render of a tab at the 760 x 480
+    /// minimum is the layout at that minimum - and it is the only way to see
+    /// it at all while the screen is locked, where no window can be
+    /// photographed.
+    private static func detailSize(services: AppServices) -> CGSize {
+        guard let content = services.windowController.attachedWindow?.contentView?.bounds.size,
+              content.width > 300, content.height > 200
+        else { return CGSize(width: 708, height: 572) }
+        return CGSize(width: content.width - Layout.sidebarWidth, height: content.height - 28)
+    }
+
+    /// The detail pane on its own, drawn by `ImageRenderer` at the size it has
+    /// in the window this run opened.
+    private static func captureDetail(
+        services: AppServices,
+        dark: Bool,
+        size: CGSize,
+        to url: URL
+    ) {
         // A macOS `ScrollView`, `Table` and `List` are AppKit views, and
         // `ImageRenderer` draws nothing for them. The overview has a
         // scroll-free form for exactly this reason.
@@ -277,7 +297,14 @@ enum DebugCapture {
                     if services.setup.isVisible {
                         SetupChecklistCard(checklist: services.setup)
                     }
-                    OverviewCards(store: services.store, settings: services.settings, twoColumns: true)
+                    // The same rule the tab itself follows, so a render at the
+                    // 760 pt minimum shows the single column that a 760 pt
+                    // window really draws.
+                    OverviewCards(
+                        store: services.store,
+                        settings: services.settings,
+                        twoColumns: size.width >= Layout.twoColumnWidth
+                    )
                 }
                 .padding(Layout.cardSpacing)
             } else if services.selectedTab == .windows {
@@ -299,7 +326,7 @@ enum DebugCapture {
                 TabDetailView(tab: services.selectedTab, services: services)
             }
         }
-        .frame(width: 708, height: 572)
+        .frame(width: size.width, height: size.height)
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(services)
         .environment(\.colorScheme, dark ? .dark : .light)
@@ -398,6 +425,13 @@ enum DebugCapture {
             "backlight available: \(services.backlight.isAvailable)",
             "report can files: \(services.reports.canReportFiles)",
             "window number: \(window?.windowNumber ?? 0)",
+            // The tab title belongs in the title bar of every tab. A `Form`
+            // tab used to leave it empty, so a capture run checks the string
+            // and the visibility rather than the pixels - and can do it with
+            // the screen locked, where no screenshot is possible at all.
+            "window title: \(window?.title ?? "none")",
+            "window title visible: \(window?.titleVisibility == .visible)",
+            "window titlebar transparent: \(window?.titlebarAppearsTransparent ?? false)",
             "app active: \(NSApp.isActive)",
             "activation policy: \(NSApp.activationPolicy().rawValue)",
             "window: \(window.map { "\($0.frame)" } ?? "none")",

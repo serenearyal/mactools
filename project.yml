@@ -194,6 +194,10 @@ targets:
       - App/Model/LRUCache.swift
       - App/Model/MainTab.swift
       - App/Model/PopoverSection.swift
+      # The popover's sizes. Plain numbers in a file of their own, away from
+      # the views, because the panel and every section in it are fixed frames
+      # now and the arithmetic between them has to hold.
+      - App/MenuBar/PopoverLayout.swift
       - App/Model/MetricsSample.swift
       - App/Model/MenuBarMetric.swift
       # The graph and sensor history: which traces a pass adds and which one

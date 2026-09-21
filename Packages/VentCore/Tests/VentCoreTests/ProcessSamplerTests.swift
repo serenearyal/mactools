@@ -319,3 +319,88 @@ struct ProcessMergeTests {
         #expect(ProcessSampler.merge(local: once, privileged: privileged) == once)
     }
 }
+
+/// The path cache: `proc_pidpath` is the most expensive call of a pass, and
+/// the executable of a running process never changes. What must never happen
+/// is a pid the kernel handed on inheriting the name of the process before it.
+@Suite("process identity cache")
+struct ProcessIdentityCacheTests {
+    private func cached(
+        command: String = "Vent",
+        start: UInt64? = 1_000,
+        path: String? = "/Applications/Vent.app/Contents/MacOS/Vent",
+        name: String = "Vent"
+    ) -> ProcessSampler.CachedProcess {
+        ProcessSampler.CachedProcess(
+            cpu: nil,
+            command: command,
+            startAbsoluteTime: start,
+            path: path,
+            name: name
+        )
+    }
+
+    @Test("the same process keeps the path the last pass looked up")
+    func reusesTheSameProcess() {
+        let reused = ProcessSampler.reusableIdentity(
+            cached: cached(),
+            command: "Vent",
+            startAbsoluteTime: 1_000
+        )
+        #expect(reused?.name == "Vent")
+        #expect(reused?.path == "/Applications/Vent.app/Contents/MacOS/Vent")
+    }
+
+    @Test("a pid reused by another process looks its path up again")
+    func refusesAReusedPID() {
+        #expect(
+            ProcessSampler.reusableIdentity(
+                cached: cached(),
+                command: "Vent",
+                startAbsoluteTime: 2_000
+            ) == nil
+        )
+        #expect(
+            ProcessSampler.reusableIdentity(
+                cached: cached(),
+                command: "Finder",
+                startAbsoluteTime: 1_000
+            ) == nil
+        )
+    }
+
+    @Test("a process whose counters are refused is cached on its command alone")
+    func restrictedProcess() {
+        let reused = ProcessSampler.reusableIdentity(
+            cached: cached(command: "kernel_task", start: nil, path: nil, name: "kernel_task"),
+            command: "kernel_task",
+            startAbsoluteTime: nil
+        )
+        #expect(reused?.name == "kernel_task")
+        #expect(reused?.path == nil)
+    }
+
+    @Test("nothing cached means a lookup")
+    func noCache() {
+        #expect(
+            ProcessSampler.reusableIdentity(cached: nil, command: "Vent", startAbsoluteTime: 1) == nil
+        )
+    }
+
+    @Test("two passes over this machine agree about every name they both saw")
+    func liveTableIsStable() throws {
+        let sampler = ProcessSampler()
+        let first = try sampler.sample()
+        let second = try sampler.sample()
+        let names = Dictionary(
+            first.map { ($0.pid, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for row in second {
+            guard let before = names[row.pid], before.startAbsoluteTime == row.startAbsoluteTime
+            else { continue }
+            #expect(before.name == row.name)
+            #expect(before.executablePath == row.executablePath)
+        }
+    }
+}

@@ -24,7 +24,7 @@ struct KeepAwakeView: View {
 
                 status
             } header: {
-                Text("Keep Awake")
+                Text("Sleep")
             } footer: {
                 Text(
                     "Vent starts every launch with this off. There is no \"turn on at launch\" "

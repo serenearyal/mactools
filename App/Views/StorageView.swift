@@ -73,6 +73,9 @@ struct StorageView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                // It is this line that gives way when the toolbar runs out of
+                // room, so the whole of it stays one hover away.
+                .help(statusText)
             if storage.message != nil {
                 Button {
                     storage.clearMessage()
@@ -254,7 +257,7 @@ private struct VolumesSection: View {
             }
 
             if snapshot.volumes.isEmpty {
-                Text("Sampling...")
+                Text("Sampling…")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .frame(height: 52)

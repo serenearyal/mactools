@@ -39,23 +39,51 @@ struct ProcessesView: View {
 
     // MARK: - Toolbar
 
+    /// The three segments need 300 pt and everything to their right needs
+    /// about 270 more. A 760 pt window - the narrowest the layout allows -
+    /// leaves 568 for the lot, and the Force Quit button used to fall off the
+    /// right edge of it. `ViewThatFits` takes the segments down to a pop-up
+    /// with the same three choices when the row will not fit, so nothing is
+    /// ever clipped and nothing wraps.
     private var toolbar: some View {
-        HStack(spacing: Layout.gutter) {
-            Picker("Show", selection: $store.scope) {
-                ForEach(ProcessFilterScope.allCases) { Text($0.title).tag($0) }
+        ViewThatFits(in: .horizontal) {
+            toolbarRow {
+                Picker("Show", selection: $store.scope) {
+                    ForEach(ProcessFilterScope.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 300)
+                .controlSize(.small)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            // 300 pt is what the three segments need; below it the titles are
-            // clipped, so the search field beside it is what gives way in a
-            // narrow window instead.
-            .frame(width: 300)
-            .controlSize(.small)
+            toolbarRow {
+                Picker("Show", selection: $store.scope) {
+                    ForEach(ProcessFilterScope.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+                .controlSize(.small)
+                .help("Which processes the table shows")
+            }
+        }
+        .padding(.horizontal, Layout.cardPadding)
+        .padding(.vertical, Layout.gutter)
+    }
+
+    private func toolbarRow(@ViewBuilder scope: () -> some View) -> some View {
+        HStack(spacing: Layout.gutter) {
+            scope()
 
             Spacer(minLength: Layout.gutter)
 
-            SearchField(text: $store.searchText, prompt: "Name, PID or path")
+            // "Search", like the Storage tab, and what it searches is in the
+            // tooltip: the toolbar squeezes this field below 110 pt in a
+            // 900 pt window, and a prompt that reads "Name, PID or p…" tells
+            // nobody anything.
+            SearchField(text: $store.searchText)
                 .frame(minWidth: 90, idealWidth: 190, maxWidth: 190)
+                .help("Search by name, PID or path")
 
             CopyForAIMenu(
                 subject: .processes,
@@ -83,8 +111,6 @@ struct ProcessesView: View {
             .help("Force Quit the selected process (SIGKILL)")
             .disabled(store.selection.isEmpty)
         }
-        .padding(.horizontal, Layout.cardPadding)
-        .padding(.vertical, Layout.gutter)
     }
 
     private func ask(_ signal: ProcessSignal, ids: Set<ProcessTableRow.ID>? = nil) {
@@ -340,7 +366,7 @@ private struct TopList: View {
             .padding(.bottom, 2)
 
             if rows.isEmpty {
-                Text("Sampling...")
+                Text("Sampling…")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {

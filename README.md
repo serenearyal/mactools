@@ -1,16 +1,20 @@
 # Vent
 
-A native macOS menu bar monitor for an Apple silicon Mac.
-It shows live metrics in the menu bar, reads every SMC sensor, controls the fans through a root helper, finds the largest files on the disk and locks the keyboard so you can wipe it.
+A native macOS menu bar monitor and toolbox for an Apple silicon Mac.
+It shows live metrics in the menu bar, reads every SMC sensor, controls the fans through a root helper, finds the largest files on the disk, tiles your windows, holds the Mac awake, sets the keyboard backlight and locks the keyboard so you can wipe it.
 
 Vent is written in Swift 6 and SwiftUI, has no dependencies outside the system frameworks, and is built for one machine class: an Apple silicon Mac running macOS 26 or later.
 
-- **Menu bar.** Any of ten metrics, in the order you choose, with a fixed width so the numbers never shift, and a popover with the whole machine behind one click.
+- **Menu bar.** Any of ten metrics, in the order you choose, with a fixed width so the numbers never shift, and a 400 pt popover with three tabs behind one click: Dashboard, Windows, Tools.
 - **Overview.** CPU with per-core bars, memory, disk space and throughput, temperatures, fan speeds and system power.
 - **Fans.** Auto, a constant speed, or a curve that follows a sensor, with clamps and a thermal interlock.
 - **Sensors.** All 2038 SMC keys of a MacBookPro18,3, named and grouped.
 - **Processes.** The full table, including the processes you do not own, with Quit and Force Quit.
 - **Storage.** Volumes with live read and write, and a whole-disk scan for the 500 largest files.
+- **Copy for AI.** The process table or the largest files as a markdown table with a header that explains this Mac, ready to paste into a chat.
+- **Windows.** Halves, corners, thirds, maximize and the other tiles, from a grid or from Rectangle's own shortcuts, with a second set for when Rectangle is running.
+- **Keep Awake.** A sleep assertion with a duration, a battery guard and an "Awake 42m" badge.
+- **Keyboard Backlight.** The built-in keyboard's brightness on a slider, with the Auto switch the ambient sensor uses.
 - **Keyboard Lock.** Every key dead for as long as you need, with three ways out.
 
 ## Build
@@ -44,9 +48,9 @@ The launch daemon is registered with the path of the bundle that registered it, 
 A copy that runs from the Downloads folder or from `build/` collects a second set of both and loses them again the moment it moves.
 Vent says so in an orange banner above every tab and changes nothing by itself: moving an app behind the user's back is worse than a line of text.
 
-Vent has no Dock icon and no menu of its own.
-A click on the menu bar item drops down a popover with the live numbers, and the window opens from the **Open Vent** button in it.
-Closing the window leaves the app running.
+Vent has no Dock icon by default and no menu of its own.
+A click on the menu bar item drops down the popover, and the window opens from the **Open Vent** button in it.
+Closing the window leaves the app running: the toolbar button says so, and **Settings > Appearance > Show Dock icon** puts Vent in the Dock for as long as you want it there.
 
 ## First run
 
@@ -57,7 +61,7 @@ Every one of them is optional: Vent runs, samples and draws without any of them.
 | Row | What it unlocks | Where it is granted |
 |-----|-----------------|---------------------|
 | Privileged helper | Fan control, and the CPU and memory of processes you do not own | The Install button, then System Settings > General > Login Items & Extensions |
-| Accessibility and Input Monitoring | The keyboard lock | The system prompt, then System Settings > Privacy & Security |
+| Accessibility and Input Monitoring | Moving windows, and the keyboard lock | The system prompt, then System Settings > Privacy & Security |
 | Full Disk Access | A storage scan that reads every folder | System Settings > Privacy & Security > Full Disk Access |
 | Launch at login | Vent starts with the session | The toggle in Settings, or the checklist row |
 
@@ -69,7 +73,7 @@ The rows refresh by themselves every time Vent comes back to the front, because 
 ### Why each one
 
 - **The helper.** Only root may write to the SMC, so a fan cannot be set without a process that runs as root. The same process reads the CPU and memory counters that libproc refuses for about 219 of the 580 processes on a running Mac.
-- **Accessibility.** An event tap that swallows keys is a privilege macOS reserves for apps the user has trusted.
+- **Accessibility.** Two things need it: moving another app's window through the accessibility API, and an event tap that swallows keys. macOS reserves both for apps the user has trusted.
 - **Input Monitoring.** A tap that sees key codes needs its own grant; without it the tap exists and receives nothing.
 - **Full Disk Access.** Without it the scan still runs, but it cannot read the protected folders - Mail, Messages, Safari, the Time Machine store - and counts them as unreadable. macOS also puts up a consent prompt per protected folder for an app without it, which is the other reason to grant it once.
 - **Launch at login.** Vent only measures while it runs. Without the login item the menu bar is empty after a restart until you open the app by hand. It is an `SMAppService.mainApp` registration, so no password is asked; macOS can put it in "needs approval", and the row then links straight to Login Items & Extensions.
@@ -81,23 +85,34 @@ A second left click, a click anywhere else or Escape closes the popover again.
 
 ### The popover
 
-340 pt wide, the whole machine at a glance, and no window in sight.
+400 pt wide and 600 pt tall, with three tabs: **Dashboard**, **Windows**, **Tools**.
+Command-1, Command-2 and Command-3 switch between them, and the last one stays chosen for the next click.
+
+The header has **Open Vent**, **Settings** and **Quit**, and a badge slot that shows **Awake 42m** while Keep Awake holds an assertion.
+
+**Dashboard** is the whole machine at a glance.
+Every section title opens the matching tab.
 
 | Section | What it shows | What the title opens |
 |---------|---------------|----------------------|
 | CPU | Total load, a sparkline of the last minutes, a bar per core with the E and P clusters apart | Overview |
 | Memory | Used of total, the pressure dot, the app / wired / compressed / cached bar, free and swap | Overview |
 | Storage | Used of total on the boot volume, the bar, free space and the read and write throughput | Storage |
-| Thermals & Fans | Hottest CPU sensor, GPU, system power, and each fan with its mode and speed | Fans |
-| Top Processes | The three heaviest by CPU and by memory | Processes |
+| Thermals & Fans | Hottest CPU sensor, GPU, system power, each fan with its mode and speed, and Auto / Full Blast | Fans |
+| Top Processes | The three heaviest by CPU and by memory, and the Copy for AI button | Processes |
 
-The header has **Open Vent**, **Settings** and **Quit**, and a badge slot that shows **Awake 42m** while Keep Awake holds an assertion.
-The **Tools** section holds one row each for Keep Awake, Keyboard Backlight, Fans, Keyboard Lock, Copy for AI and Scan Storage, in that order; the rows share the fixed height of the panel between them, so a Mac with no keyboard backlight gets five slightly taller rows rather than a hole.
+**Windows** is the window manager: the app and window that were in front, the tile grid, the extra actions, the gap slider and the conflict banner.
+A tile moves that window and hands the front back to the app it belongs to.
+
+**Tools** holds one row each for Keep Awake, Keyboard Backlight, Fans, Keyboard Lock, Copy for AI and Scan Storage, in that order; the rows share the fixed height of the panel between them, so a Mac with no keyboard backlight gets five slightly taller rows rather than a hole.
 **Auto** and **Full Blast** set every fan at once, and are disabled with one line of explanation while the helper is not installed.
 Every button that leads somewhere closes the popover first.
 
-While the popover is open, Vent samples exactly as it does with the window open: metrics at the refresh interval, processes every 3 s, fans every 2 s.
-It gives all of that up when the popover closes, and an idle Vent with nothing on screen is back to about 0.6 % of one core.
+The panel and each section of the Dashboard are fixed frames, to the point.
+Nothing jumps when a number grows a digit, the popover does not re-anchor itself when you change tab, and SwiftUI never has to measure the panel again while it is open - which is most of what an open popover used to cost.
+
+What the popover samples follows the tab it is on: the Dashboard asks for everything it draws, Tools asks for the fans alone, and Windows asks for nothing at all, so an open popover on that tab costs what a closed one costs.
+It gives all of it up when the popover closes.
 The popover opens on the last numbers it had, so there is no empty frame and no jump when the first fresh sample lands.
 
 The label is a SwiftUI view rendered into a template image, so the system paints it for light and dark mode.
@@ -112,6 +127,17 @@ Both numbers are measured by the capture path, which writes the rendered label w
 The doc comment on `MenuBarContent` in `App/Model/Settings.swift` quotes the same two numbers.
 
 The window keeps showing every metric either way.
+
+### Hide to Menu Bar, and the Dock icon
+
+The window's toolbar has one button, **Hide to Menu Bar**, and Command-W does the same thing.
+An accessory app has no menu bar of its own, so without that shortcut Command-W would do nothing at all.
+The window goes away, the status item and everything it samples stay, and the first time it happens the status item drops a one-time tip that says so: "Vent keeps running here".
+The tip appears once ever, and only on a close the user made.
+
+**Settings > Appearance > Show Dock icon** switches the app between `.accessory` and `.regular`.
+It is the way back for a Mac whose menu bar has no room left: with the Dock icon on there is an icon to click and an app menu with the standard Quit.
+The window survives both directions, and the setting is remembered.
 
 ## The privileged helper
 
@@ -392,22 +418,24 @@ A slider and an Auto toggle for the built-in keyboard's backlight, through the p
 Vent is a monitor: it is running all day, and the one thing it must never be is the reason the fan comes on.
 The budgets below are for the **Release** build on an M1 Pro, measured over a minute with `top`, and `scripts/measure_idle.sh` prints the table.
 
-| State | Budget | This Mac | On wall power, out of Low Power Mode | Before this work |
+| State | Budget | This Mac, on battery | With the power rules off | Before this work |
 |---|---|---|---|---|
-| Closed - menu bar label only | < 0.5 % CPU | 0.09 % | 0.34 % | 0.79 % |
+| Closed - menu bar label only | < 0.5 % CPU | 0.19 % | 0.27 % | 0.79 % |
 | Closed - "icon only", or the item parked behind the notch | about nothing | 0.00 % | 0.00 % | 0.79 % |
-| Popover open on Dashboard | < 2 % | 1.56 % | 2.43 % | 2.82 % |
-| Popover open on Tools | < 2 % | 0.17 % | 0.49 % | 1.34 % |
-| Window open on Overview | < 3 % | 0.72 % | 2.12 % | 2.85 % |
-| Window open on Processes | < 4 % | 3.50 % | 3.67 % | 4.33 % |
-| Window open on Windows (and Keep Awake, Backlight, Settings) | about the closed baseline | 0.09 % | 0.35 % | 0.89 % |
+| Popover open on Dashboard | < 2 % | 1.87 % | 1.63 % | 2.82 % |
+| Popover open on Tools | < 2 % | 0.44 % | 0.48 % | 1.34 % |
+| Window open on Overview | < 3 % | 1.77 % | 1.78 % | 2.85 % |
+| Window open on Processes | < 4 % | 2.42 % | 2.71 % | 4.33 % |
+| Window open on Windows (and Keep Awake, Backlight, Settings) | about the closed baseline | 0.25 % | 0.32 % | 0.89 % |
 
-The middle column is the Mac this was measured on, which has Low Power Mode on; the next one is the same build with `--power-rules off`, which is what a Mac on wall power with Low Power Mode off does.
+The middle column is the Mac this was measured on: an M1 Pro on battery, out of Low Power Mode, so the cadence carries the x2 the battery asks for.
+The next column is the same build with `--power-rules off`, which samples as if the Mac were on wall power, out of Low Power Mode and cool - the fastest the app ever runs, and the number to hold a budget against.
+Low Power Mode is x2 on top of wall power and x4 on top of battery, so a Mac in it costs less than either column.
 The last column is the build before this work, which had no icon-only rule at all: it sampled for a label nobody could see, so its second row is its first row.
-The open Dashboard is the one state that is over its budget there, and the profiler says what is left is SwiftUI laying the panel out again on every pass, not sampling.
+Two runs of the same state land about 0.3 points apart on a Mac somebody is using, which is why the two middle columns cross each other in places; both tables are in `build/measure/`.
 
-Idle wakeups in the closed state: **0.04 per second** (the budget was under 15).
-Memory: 15 MB closed, 30 MB with the popover open, 45-67 MB with the window open.
+Idle wakeups in the closed state: **0.09 per second** (the budget was under 15).
+Memory: 14-15 MB closed, 30-34 MB with the popover open, 49-66 MB with the window open.
 
 ### Where the cost went
 
@@ -418,6 +446,9 @@ Memory: 15 MB closed, 30 MB with the popover open, 45-67 MB with the window open
 - **One observable property per domain.** A CPU-only pass invalidates the CPU card and nothing else, and a value that did not change is not written at all.
 - **The process table is filtered and sorted once per sample**, not inside `body`, and the popover reads it every 5 s where its own tab reads it every 3.
 - **The sparkline is one `Canvas` and one `Path`**, not a `Chart` with a `LineMark` per sample: 300 marks was the most expensive thing on screen.
+- **The popover is a fixed size, and so is every section in it.** A panel that sizes itself to its content makes SwiftUI measure the whole tree again on every sample - `RootGeometry` down through every stack - and that pass alone was 1.4 % of a core with the Dashboard open, more than the numbers themselves cost. `PopoverLayout` holds the panel height and the height of each Dashboard section, so a CPU sample redraws the CPU section and asks its siblings nothing. The value labels have fixed widths in monospaced digits for the same reason, and the core bars are one `Canvas` per cluster instead of a stack of shapes.
+- **Free space is asked for the cheap way.** The key that reports purgeable space makes the system validate the volume's cache, which was the single most expensive call in a pass; the full read now happens once a minute and the passes in between carry its purgeable figure forward.
+- **A process keeps its path until it is a different process.** `proc_pidpath` is a syscall per process per pass; the path and the display name are cached against the pid, the command name and the start time, so only a new pid, or a pid the system reused, pays for one.
 - **Temperatures are read at most every 3 s**, and the popover asks for the CPU and GPU dies rather than every labelled sensor. Every sensor is a driver round trip, and a die does not move in a second. The Sensors and Fans tabs are exempt: their charts want every point.
 - **Slower on battery** (x2 with nothing on screen), **in Low Power Mode** (x2 on wall power, x4 on battery) and at a serious thermal state (never faster than 5 s), capped at 10 s. Every input is a push notification; nothing polls for it.
 - **App Nap stays on.** There is no `beginActivity` anywhere in the app, the helper or the CLI.
@@ -528,7 +559,11 @@ ventctl fan-set 0 2500 --hold   # holds it here until Ctrl-C
 ventctl fan-auto
 ventctl selftest-fans           # the live sequence, with a temperature guard
 ventctl procs                   # the merged process table
+ventctl cpu                     # total and per-core load over one second
+ventctl mem                     # the memory breakdown
+ventctl disks                   # the mounted volumes with their capacity
 ventctl io                      # disk throughput
+ventctl watch                   # one line a second: CPU, memory, I/O, power, temperature
 ventctl scan ~/Downloads        # the walker on one folder
 ventctl window list             # the windows of the frontmost app, read only
 ventctl helper-ping
@@ -555,7 +590,11 @@ They exist so a build agent can take a screenshot or drive a tab with no click, 
 open -a Vent --args --show-window --tab sensors
   --tab <name>                 open on one tab
   --show-window                open the window at launch
+  --hide-window-after <n>      press "Hide to Menu Bar" after n seconds
+  --show-menu-bar-tip          let the one-time "Vent keeps running here" tip appear
+  --dock-icon-test <n>         switch the Dock icon on at second n and off five later
   --show-popover               drop down the menu bar popover at launch, window closed
+  --popover-section <name>     dashboard|windows|tools for this run, written nowhere
   --popover-seconds <n>        close the popover again after n seconds
   --setup-checklist hide|show  draw the Overview with or without the setup card
   --processes-sort name        open the process table on another column
@@ -576,16 +615,23 @@ open -a Vent --args --show-window --tab sensors
   --window-front               order the window on top without activating (measurement only)
   --popover-offscreen          the popover's view and sampling demand, off the corner of the screen
   --menu-bar-label on|off      pretend the status item label is drawing numbers, or is not
+  --power-rules off            sample as if on wall power, out of Low Power Mode and cool
+  --measure-run <tag>          a marker the app ignores; the measuring script finds its own pid by it
   --label-bench <dir>          time both label renders and write the pixel difference between them
   --capture <dir>              write PNGs and a status file after --capture-delay seconds
-  --appearance dark|light      force one appearance
+  --capture-delay <n>          how long to wait before the capture; 8 s by default
+  --appearance dark|light      force one appearance, for this app alone
   --capture-quit               quit when the capture is done
 ```
 
+`--appearance` changes nothing outside this process, and no path in Vent, in the tests or in the scripts ever touches the system appearance.
+
 The capture path writes a status file with the window numbers of the window and of the popover, so a screenshot of either is `screencapture -x -o -l <number>`.
 Launch it with `open -g -n /Applications/Vent.app --args --no-activate ...`: `screencapture -l` photographs a window that is behind others, so a capture run never has to take the front from whoever is using the Mac.
+Two things stop it: a locked screen, where no window has an image at all, and a window the system has marked occluded for long enough to throw its backing store away.
+The status file is written either way, and it carries the window title, the sampling demand and every counter, so most of a UI check can be made with the screen locked.
 The one thing it cannot photograph that way is the real popover: `NSPopover` does not appear for an inactive app, so a run without activation gets the `ImageRenderer` copy instead.
-It also renders the popover with `ImageRenderer` into `popover-<appearance>.png`, which needs no Screen Recording grant at all.
+It also renders each popover section with `ImageRenderer` into `popover-<section>-<appearance>.png`, which needs no Screen Recording grant at all.
 That render is the only way to see the popover in the other appearance: the real one is built against the menu bar and follows the system, whatever `--appearance` says.
 It is not the way to check the Tools section: a `Menu`, a switch and a `Slider` are AppKit-backed views, and `ImageRenderer` draws a yellow placeholder for each of them, so that section has to be photographed from the real popover window by number.
 The same file counts the samples of the three stores, so a popover that left a timer running is one `grep` away.
@@ -605,8 +651,24 @@ There is no `print` anywhere in `App/` or `Helper/`; only `ventctl`, whose outpu
 
 ## Manual acceptance checklist
 
-These need a human: an admin password, a physical keyboard, a privacy grant or a power button.
+These need a human: an admin password, a physical keyboard, a privacy grant, a power button or a pair of eyes.
 Run them after any change to the helper, the fan code or the lock.
+
+### Round 2, live
+
+Nothing here can be proved by a test or a screenshot: a global shortcut needs a real key press, a backlight needs eyes, a paste needs another app.
+
+- [ ] Quit Rectangle and turn its launch at login off. In Vent's Windows tab pick **Rectangle layout**, and every dot in the shortcut table goes green.
+- [ ] Put a window in front of Vent and press ⌃⌥←, ⌃⌥→, ⌃⌥↩ and ⌃⌥⌫. The window halves, halves the other way, maximizes and comes back where it started.
+- [ ] Press ⌃⌥← twice more: the half becomes two thirds and then one third, and the ladder starts over after two seconds.
+- [ ] With Rectangle running again, the banner names it with its version, **Use Vent's alternate set** switches the table to ⌃⌥⇧, and those chords move a window with Rectangle still on its own set.
+- [ ] Move the Keyboard Backlight slider and watch the keyboard: the light follows within a moment, F5 and F6 keep working, and the slider follows them back.
+- [ ] Switch **Auto brightness** off and on in the tab, and `ventctl backlight get` agrees with the switch both times. Leave it the way you found it.
+- [ ] Turn Keep Awake on for 30 minutes: `pmset -g assertions | grep Vent` shows `PreventUserIdleSystemSleep` with a timeout, the header badge counts down, and `kill -9` of Vent takes the assertion with it.
+- [ ] Press Command-W in the window: it hides, the status item stays, and the first time the tip "Vent keeps running here" appears under it.
+- [ ] Settings > Appearance > **Show Dock icon**: the icon appears in the Dock, the window survives, the app menu has Quit, and switching it off puts the app back in the menu bar alone.
+- [ ] **Copy for AI** in the Processes toolbar, then paste into a chat: the preamble names this Mac, the table has 60 rows, and every column lines up. The same from the popover's Tools row, which samples first and says "Copied 60 processes".
+- [ ] A tile in the popover's Windows section moves the window that was in front, and the front goes back to that app rather than staying with Vent.
 
 ### The helper
 

@@ -28,6 +28,7 @@ struct MainWindowView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle(services.selectedTab.title)
+            .toolbarTitleDisplayMode(.inline)
         }
         .frame(minWidth: 760, minHeight: 480)
         .toolbar {

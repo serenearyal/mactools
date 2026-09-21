@@ -258,7 +258,7 @@ struct PopoverTools: View {
     private var copyDetail: String {
         reports.canReportFiles
             ? "Processes, or the largest files"
-            : "Files needs a scan first"
+            : "Files need a scan first"
     }
 
     // MARK: - Storage
@@ -269,7 +269,7 @@ struct PopoverTools: View {
             symbolName: "magnifyingglass",
             detail: "Find the largest files on this Mac"
         ) {
-            Button("Scan Storage...") { open(.storage) }
+            Button("Scan Storage…") { open(.storage) }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
                 .help("Open the Storage tab to find the largest files")

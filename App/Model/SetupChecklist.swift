@@ -112,9 +112,12 @@ final class SetupChecklist {
         return SetupStep(
             id: "input",
             title: "Accessibility and Input Monitoring",
+            // Accessibility carries the window manager as well now, and a
+            // checklist that only names the keyboard lock reads like a reason
+            // to skip it.
             reason: granted
-                ? "The keyboard lock may hold every key."
-                : "The keyboard lock needs \(missing.joined(separator: " and ")) before it can hold the keys.",
+                ? "The window manager may move windows, and the keyboard lock may hold every key."
+                : "Moving windows and holding the keys needs \(missing.joined(separator: " and ")).",
             isDone: granted,
             actionTitle: granted ? nil : "Grant",
             action: granted ? nil : .grantInputPermissions

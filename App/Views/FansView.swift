@@ -45,7 +45,12 @@ struct FansContent: View {
     /// from the pane instead of negotiated inside the `HStack`, because a
     /// flexible frame there is resolved before the cards have said what they
     /// need and the column keeps its maximum at every size.
-    private static let sensorColumn = (minimum: 180.0, ideal: 236.0, cards: 400.0)
+    /// The minimum is what "CPU performance core 1" needs beside its reading:
+    /// at 180 pt every core name truncated to the same "CPU perfo…", which
+    /// names nothing at all. The cards give the 18 pt up; at the 760 pt
+    /// minimum they keep 370 pt, and the widest thing in them - the three
+    /// mode segments - needs 332.
+    private static let sensorColumn = (minimum: 198.0, ideal: 236.0, cards: 370.0)
 
     static func sensorColumnWidth(paneWidth: CGFloat) -> CGFloat {
         min(sensorColumn.ideal, max(sensorColumn.minimum, paneWidth - sensorColumn.cards))
@@ -751,11 +756,13 @@ private struct SensorColumn: View {
                         HStack(spacing: Layout.gutter) {
                             // The column is 180 pt at the narrowest window, so
                             // a long sensor name truncates; the tooltip is
-                            // where the whole one still is.
+                            // where the whole one still is. From the middle,
+                            // because what these names differ in is their last
+                            // word: eight rows of "CPU performa…" name nothing.
                             Text(trace.label)
                                 .font(.callout)
                                 .lineLimit(1)
-                                .truncationMode(.tail)
+                                .truncationMode(.middle)
                                 .help(trace.label)
                             Spacer(minLength: Layout.gutter)
                             Text(Fmt.temperature(trace.current, unit: settings.temperatureUnit))
