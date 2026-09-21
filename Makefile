@@ -31,6 +31,16 @@ install: build
 	rm -rf "$(INSTALLED)"
 	ditto "$(APP)" "$(INSTALLED)"
 	@echo "installed $(INSTALLED) ($(CONFIG))"
+	@# An instance that was already running keeps the old binary in memory, and
+	@# `open` on a running app starts nothing. Restart it AFTER the copy, in
+	@# the background, so the user is never left on the build before this one.
+	@pid=$$(pgrep -f "^$(INSTALLED)/Contents/MacOS/Vent" | head -1); \
+	if [ -n "$$pid" ]; then \
+		kill $$pid; \
+		while kill -0 $$pid 2>/dev/null; do /bin/sleep 0.2; done; \
+		open -g "$(INSTALLED)"; \
+		echo "restarted the running Vent in the background"; \
+	fi
 
 # The shipping build: optimised, hardened runtime, signed with the same Apple
 # Development identity as everything else. There is no Developer ID on this

@@ -36,3 +36,9 @@ Rules from user corrections. Review at session start.
 
 - Keep Awake used an idle-sleep assertion. The user's reference was `sudo pmset disablesleep 1`, which also keeps the Mac awake with the lid closed. The two are different features.
 - Rule: when the user has a tool or command that they use today, the feature must do at least what that does.
+
+## An install is not done until the running instance is the new binary
+
+- I quit Vent, built for a minute, copied the app and ran `open -g`. Vent had started again during the build, so `open` did nothing and the user stayed on the old build. I told the user that a new option was there, and it was not.
+- Rule: `make install` restarts a running installed instance after the copy. Never quit first and build after.
+- Rule: after an install, compare the process start time with the binary's modification time before I say "installed and running".
