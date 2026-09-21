@@ -42,3 +42,9 @@ Rules from user corrections. Review at session start.
 - I quit Vent, built for a minute, copied the app and ran `open -g`. Vent had started again during the build, so `open` did nothing and the user stayed on the old build. I told the user that a new option was there, and it was not.
 - Rule: `make install` restarts a running installed instance after the copy. Never quit first and build after.
 - Rule: after an install, compare the process start time with the binary's modification time before I say "installed and running".
+
+## Take the evidence before you kill the process
+
+- The user's long-running Vent made WindowServer use about 37 points of CPU (43.6 % with it, 7.2 % without it). I saw that only because I stopped it for a measurement, and then the evidence was gone: a new instance did not show the load in 12 different states.
+- Rule: when a process looks guilty, first run `sample <pid> 5`, save its window list and its state file, and only then stop it.
+- Rule: an efficiency budget for a menu bar app includes WindowServer, not only the app's own CPU. `scripts/measure_idle.sh` must record the WindowServer delta.
