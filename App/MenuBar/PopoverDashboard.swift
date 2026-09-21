@@ -1,16 +1,14 @@
-import FanControl
 import SMCKit
 import SwiftUI
 import SysMetrics
 
-/// Everything the window shows, at a glance: CPU, memory, storage, thermals
-/// with the two fan commands, and the heaviest processes.
+/// Everything the window shows, at a glance: CPU, memory, storage, the
+/// battery, and the heaviest processes.
 ///
 /// Every section title opens the matching tab. The numbers come straight from
 /// the stores, which sample at the user's interval while this is on screen.
 struct PopoverDashboard: View {
     let services: AppServices
-    let actions: MenuBarPopoverActions
     let open: (MainTab) -> Void
 
     private var store: MetricsStore { services.store }
@@ -32,15 +30,8 @@ struct PopoverDashboard: View {
                 StorageSection(store: store, open: open)
             }
             Divider()
-            section(height: PopoverLayout.DashboardHeight.thermals) {
-                ThermalSection(
-                    store: store,
-                    fans: services.fans,
-                    helper: services.helper,
-                    settings: services.settings,
-                    actions: actions,
-                    open: open
-                )
+            section(height: PopoverLayout.DashboardHeight.battery) {
+                PopoverBattery(store: store, settings: services.settings, open: open)
             }
             Divider()
             section(height: PopoverLayout.DashboardHeight.processes) {
@@ -320,202 +311,6 @@ private struct StorageSection: View {
     private var barStyle: Color {
         guard let volume, volume.usedFraction >= 0.9 else { return .accentColor }
         return MetricColor.usage(volume.usedFraction)
-    }
-}
-
-// MARK: - Thermals and fans
-
-private struct ThermalSection: View {
-    let store: MetricsStore
-    let fans: FanStore
-    let helper: HelperController
-    let settings: AppSettings
-    let actions: MenuBarPopoverActions
-    let open: (MainTab) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: PopoverLayout.rowSpacing) {
-            titleRow
-            statsRow
-            // One slot, one height, two possible contents: the fans, or the
-            // line that says why they cannot be commanded. See
-            // `PopoverLayout.DashboardHeight.fanSlot`.
-            fanSlot
-                .frame(
-                    width: PopoverLayout.width - PopoverLayout.padding * 2,
-                    height: PopoverLayout.DashboardHeight.fanSlot,
-                    alignment: .topLeading
-                )
-            buttons
-        }
-    }
-
-    private var titleRow: some View {
-        HStack(spacing: PopoverLayout.rowSpacing) {
-            PopoverSectionTitle(
-                title: "Thermals & Fans",
-                symbolName: "thermometer.medium",
-                tab: .fans,
-                open: open
-            )
-            Spacer(minLength: PopoverLayout.rowSpacing)
-            if fans.interlockEngaged {
-                Label("Interlock", systemImage: "thermometer.sun.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .help("A die above 100 °C: every fan is back on Auto")
-            }
-        }
-    }
-
-    private var statsRow: some View {
-        HStack(alignment: .top, spacing: PopoverLayout.rowSpacing) {
-            PopoverStat(
-                caption: "CPU",
-                value: temperature(store.hottestCPU),
-                tint: store.hottestCPU.map { MetricColor.temperature($0.celsius) }
-            )
-            PopoverStat(
-                caption: "GPU",
-                value: temperature(store.hottest(in: .gpu)),
-                tint: store.hottest(in: .gpu).map { MetricColor.temperature($0.celsius) }
-            )
-            PopoverStat(
-                caption: "POWER",
-                value: store.systemPower.map { Fmt.watts($0.watts) } ?? "--"
-            )
-        }
-    }
-
-    /// The fans, or the one thing Vent has to say about them.
-    ///
-    /// They share a slot because they are the same answer to the same
-    /// question. A Mac whose helper is missing or is the wrong build cannot be
-    /// told what to do with its fans, and the line that says so belongs where
-    /// the reader is already looking - not under the buttons, where it used to
-    /// push the Top Processes section off the bottom of the panel.
-    @ViewBuilder
-    private var fanSlot: some View {
-        if let hint = stateHint {
-            HStack(alignment: .top, spacing: PopoverLayout.rowSpacing) {
-                PopoverHint(text: hint.text, tint: hint.tint)
-                    .lineLimit(2)
-                if hint.opensSettings {
-                    Button("Open Settings") { open(.settings) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .fixedSize()
-                }
-            }
-        } else {
-            // Two at most: the popover keeps one height, and a Mac with more
-            // fans has them all on the Fans tab.
-            VStack(alignment: .leading, spacing: PopoverLayout.rowSpacing) {
-                ForEach(fanRows.prefix(2), id: \.index) { row in
-                    HStack(spacing: PopoverLayout.rowSpacing) {
-                        Text(row.name)
-                            .foregroundStyle(.secondary)
-                        Text(row.mode)
-                            .foregroundStyle(.tertiary)
-                        Spacer(minLength: PopoverLayout.rowSpacing)
-                        Text(row.rpm)
-                            .monospacedDigit()
-                            .frame(width: 72, alignment: .trailing)
-                    }
-                    .font(.caption)
-                }
-            }
-        }
-    }
-
-    /// In this order: the helper is the wrong build, then the last command was
-    /// refused, then there is no helper at all. A refused command is invisible
-    /// anywhere else in the popover.
-    private var stateHint: FanStateHint? {
-        if let mismatch = helper.mismatchMessage {
-            return FanStateHint(text: mismatch, tint: .red, opensSettings: true)
-        }
-        if let refusal = fans.lastCommandFailure {
-            return FanStateHint(text: refusal, tint: .red, opensSettings: false)
-        }
-        if !fans.isAvailable {
-            return FanStateHint(
-                text: "Fan control needs the privileged helper.",
-                tint: .secondary,
-                opensSettings: false
-            )
-        }
-        return nil
-    }
-
-    private struct FanStateHint {
-        let text: String
-        let tint: Color
-        let opensSettings: Bool
-    }
-
-    private var buttons: some View {
-        HStack(spacing: PopoverLayout.rowSpacing) {
-            Button(action: actions.startAuto) {
-                Text("Auto").frame(maxWidth: .infinity)
-            }
-            .help("Give every fan back to the firmware")
-            Button(action: actions.startFullBlast) {
-                Text("Full Blast").frame(maxWidth: .infinity)
-            }
-            .help("Hold every fan at its maximum RPM")
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.regular)
-        .disabled(!fans.isAvailable)
-    }
-
-    private func temperature(_ reading: TemperatureReading?) -> String {
-        reading.map { Fmt.temperature($0.celsius, unit: settings.temperatureUnit) } ?? "--"
-    }
-
-    /// The helper knows the mode the user asked for; without it the SMC read
-    /// still gives the speed, and the mode is what the firmware reports.
-    private var fanRows: [FanRow] {
-        FanRow.rows(fans: fans, smcFans: store.fans)
-    }
-}
-
-/// One fan, named the way both sources of truth allow.
-struct FanRow {
-    let index: Int
-    let name: String
-    let rpm: String
-    let mode: String
-
-    static func title(of mode: FanMode) -> String {
-        switch mode {
-        case .auto: "Auto"
-        case .constant: "Constant"
-        case .curve: "Curve"
-        }
-    }
-
-    @MainActor
-    static func rows(fans: FanStore, smcFans: [FanReading]) -> [FanRow] {
-        if fans.isAvailable, !fans.fans.isEmpty {
-            return fans.fans.map { fan in
-                FanRow(
-                    index: fan.index,
-                    name: "Fan \(fan.index + 1)",
-                    rpm: Fmt.rpm(fan.actualRPM),
-                    mode: title(of: fan.mode)
-                )
-            }
-        }
-        return smcFans.map { fan in
-            FanRow(
-                index: fan.index,
-                name: "Fan \(fan.index + 1)",
-                rpm: Fmt.rpm(fan.actual),
-                mode: fan.mode == .forced ? "Constant" : "Auto"
-            )
-        }
     }
 }
 

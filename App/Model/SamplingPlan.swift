@@ -1,4 +1,5 @@
 import Foundation
+import SMCKit
 
 /// Who is asking the stores for live numbers.
 ///
@@ -87,29 +88,43 @@ struct SamplingDemand: Equatable, Sendable {
 /// values in and values out, so the awkward part can be tested.
 enum SamplingPlan {
     /// Everything the Dashboard section draws: CPU, memory, the boot volume
-    /// and its throughput, the CPU and GPU dies behind "hottest CPU" and
-    /// "GPU", the fans and `PSTR`.
+    /// and its throughput, the process table and the battery.
     ///
-    /// Not the labelled set: the section draws two temperatures, and the
-    /// labelled set is three times the driver round trips for the SSD, the
-    /// battery and the enclosure sensors that live on the Sensors tab.
+    /// No temperature and no fan: the thermals moved to the Fans section, and
+    /// with them the driver round trips that were the most expensive part of an
+    /// open popover. The battery in their place is two IOKit dictionary copies
+    /// once every 30 s.
     static let popoverRequest = SampleRequest(
         cpu: true,
         memory: true,
         diskSpace: true,
         diskIO: true,
-        temperatures: .cpuGPU,
-        fans: true,
-        power: .system
+        battery: true
     )
 
     /// What one popover section shows, and nothing more.
     ///
-    /// Tools draws one fan line; Windows draws no live number at all, so an
-    /// open popover on that section costs what a closed one costs.
-    static func popoverRequest(section: PopoverSection) -> SampleRequest {
+    /// Fans draws the fan cards, the CPU and GPU dies and `PSTR`; Tools draws
+    /// one fan line; Windows draws no live number at all, so an open popover on
+    /// that section costs what a closed one costs.
+    ///
+    /// `curveSensorScope` is the cheapest scope that still reads the sensor a
+    /// fan curve follows. A curve on a CPU or GPU die needs nothing extra; a
+    /// curve on the SSD or the enclosure widens the pass to the labelled set,
+    /// because a curve editor that draws a dash where the temperature should be
+    /// is the one thing that section must not do.
+    static func popoverRequest(
+        section: PopoverSection,
+        curveSensorScope: TemperatureScope = .cpuGPU
+    ) -> SampleRequest {
         switch section {
         case .dashboard: popoverRequest
+        case .fans: SampleRequest(
+                cpu: false,
+                temperatures: Swift.max(.cpuGPU, curveSensorScope),
+                fans: true,
+                power: .system
+            )
         case .windows: .nothing
         case .tools: SampleRequest(cpu: false, fans: true)
         }
@@ -153,6 +168,24 @@ enum SamplingPlan {
         }
     }
 
+    /// The cheapest scope that still reads every sensor a fan curve follows.
+    ///
+    /// `.cpuGPU` for the ordinary case - a curve on a die - and the labelled
+    /// set for anything else, which is the same rule the Fans tab of the window
+    /// already uses. A key the catalog alone would name is not worth 0.8 s of
+    /// catalog load in a popover.
+    static func curveSensorScope(sensorKeys: [String]) -> TemperatureScope {
+        var scope = TemperatureScope.cpuGPU
+        for code in sensorKeys {
+            guard let key = SMCFourCC(code: code) else { continue }
+            switch SensorNaming.descriptor(for: key).category {
+            case .cpuPerformance, .cpuEfficiency, .gpu: continue
+            default: scope = .labelled
+            }
+        }
+        return scope
+    }
+
     /// 5 s, for an app whose menu bar label shows no number at all.
     static let idleInterval = Duration.seconds(5)
     /// However slow the power rules make it, a number on screen is never more
@@ -174,7 +207,8 @@ enum SamplingPlan {
         menuBarMetrics: [MenuBarMetric],
         chosenSensorScope: TemperatureScope,
         showsUnlabelledSensors: Bool,
-        spinsFanIcon: Bool = false
+        spinsFanIcon: Bool = false,
+        curveSensorScope: TemperatureScope = .cpuGPU
     ) -> SampleRequest {
         // A label that draws no number asks for nothing at all, not even the
         // one CPU call: that is what lets an icon-only app, and an app whose
@@ -189,7 +223,9 @@ enum SamplingPlan {
             )
             : .nothing
         if demand.wantsPopover {
-            request.formUnion(popoverRequest(section: demand.popoverSection))
+            request.formUnion(
+                popoverRequest(section: demand.popoverSection, curveSensorScope: curveSensorScope)
+            )
         }
         if demand.wantsWindow {
             request.formUnion(
@@ -320,6 +356,19 @@ enum SamplingPlan {
         return sinceLastRead < temperatureFloor
     }
 
+    /// The shortest time between two battery reads.
+    ///
+    /// The same idea as `temperatureFloor`, with a much longer floor: a
+    /// percentage moves once every few minutes even under load, and the read is
+    /// two CoreFoundation dictionary copies and a registry walk. A popover open
+    /// at 1 s reads the battery on its first pass and then once every 30 s.
+    static let batteryFloor = Duration.seconds(30)
+
+    /// True when this pass should keep the battery reading it already has.
+    static func throttlesBattery(sinceLastRead: Duration) -> Bool {
+        sinceLastRead < batteryFloor
+    }
+
     /// A fifth of the interval, on every periodic sleep in the app.
     ///
     /// The kernel may fire a tolerant timer early or late to put it next to a
@@ -397,6 +446,7 @@ extension SampleRequest {
         temperatures = Swift.max(temperatures, other.temperatures)
         fans = fans || other.fans
         power = Swift.max(power, other.power)
+        battery = battery || other.battery
     }
 
     func union(_ other: SampleRequest) -> SampleRequest {

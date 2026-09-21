@@ -18,6 +18,7 @@ commands:
   mem          print the memory breakdown
   disks        print the mounted volumes with their capacity
   io           print disk I/O throughput over one second
+  battery      print the battery: charge, state, cycles, health, watts
   procs        print the process table
   watch        stream CPU, memory, disk I/O, power and CPU temperature
   scan         run the largest-files scan
@@ -151,6 +152,9 @@ do {
     case "io":
         let options = try Options(tail, allowed: ["interval"])
         try MetricsCommands.io(interval: try options.double("interval", default: 1, range: 0.1...60))
+    case "battery":
+        try withoutOptions()
+        try MetricsCommands.battery()
     case "procs":
         let options = try Options(tail, allowed: ["sort", "top", "interval"], flags: ["helper"])
         let name = options.string("sort") ?? "cpu"

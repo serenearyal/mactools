@@ -43,6 +43,9 @@ struct SampleRequest: Sendable, Equatable {
     var temperatures: TemperatureScope = .none
     var fans = false
     var power: PowerScope = .none
+    /// Two IOKit dictionary copies, and the store puts a floor of 30 s under
+    /// them: a battery does not move in a second.
+    var battery = false
 
     static let everything = SampleRequest(
         cpu: true,
@@ -51,7 +54,8 @@ struct SampleRequest: Sendable, Equatable {
         diskIO: true,
         temperatures: .labelled,
         fans: true,
-        power: .labelled
+        power: .labelled,
+        battery: true
     )
 
     /// What a tab or a popover section that shows no live number asks for.
@@ -74,6 +78,7 @@ struct SampleRequest: Sendable, Equatable {
         if temperatures != .none { parts.append("temperatures(\(temperatures))") }
         if fans { parts.append("fans") }
         if power != .none { parts.append("power(\(power))") }
+        if battery { parts.append("battery") }
         return parts.isEmpty ? "nothing" : parts.joined(separator: " + ")
     }
 }
@@ -94,6 +99,13 @@ struct MetricsSample: Sendable {
     var temperatureScope: TemperatureScope = .none
     var fans: [FanReading]?
     var power: [PowerReading]?
+    /// nil both when the pass did not ask and when the machine has no battery;
+    /// `batteryRead` tells the two apart.
+    var battery: BatteryReading?
+    /// True when this pass really read the battery, whatever it found. The
+    /// store's 30 s floor moves on this and not on the value, so a Mac mini
+    /// does not copy the power source dictionaries on every pass.
+    var batteryRead = false
     /// nil while the SMC connection has not been tried, false when it failed.
     var smcAvailable: Bool?
 }
@@ -108,6 +120,8 @@ struct MetricsSnapshot: Sendable {
     var temperatures: [TemperatureReading] = []
     var fans: [FanReading] = []
     var power: [PowerReading] = []
+    /// nil on a Mac with no battery, and until the first pass that asks.
+    var battery: BatteryReading?
     var smcAvailable = true
 
     var bootVolume: VolumeInfo? {
@@ -151,6 +165,7 @@ struct MetricsSnapshot: Sendable {
         if let temperatures = sample.temperatures { self.temperatures = temperatures }
         if let fans = sample.fans { self.fans = fans }
         if let power = sample.power { self.power = power }
+        if let battery = sample.battery { self.battery = battery }
         if let available = sample.smcAvailable { smcAvailable = available }
     }
 }

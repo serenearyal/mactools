@@ -40,6 +40,31 @@ enum DebugCapture {
         let quit = arguments.contains("--capture-quit")
         let suffix = value(of: "--appearance", in: arguments) ?? "light"
 
+        // The popover draws live numbers, and a capture run has no popover
+        // open: the stores would sample what the menu bar label needs and
+        // nothing else, so every section of the render would be a column of
+        // dashes - a Dashboard that says "No battery" on a Mac that has one.
+        //
+        // The run asks for the popover's demand itself and visits the two
+        // sections that read anything, half the delay each: the Dashboard's
+        // battery and disk first, then the dies, the fans and the power that
+        // the Fans section reads. Each domain of the store keeps its last
+        // value, so the render at the end has a real number in both.
+        //
+        // `--popover-section` overrules the visit: a run that names one
+        // section spends the whole delay sampling that section, and the status
+        // file names it.
+        services.setPopoverVisible(true)
+        let requestedSection = value(of: "--popover-section", in: arguments)
+            .flatMap(PopoverSection.init(argument:))
+        let sampledSections: [PopoverSection] = requestedSection.map { [$0] } ?? [.dashboard, .fans]
+        for (index, section) in sampledSections.enumerated() {
+            let at = delay * Double(index) / Double(sampledSections.count)
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) {
+                services.overridePopoverSection(section)
+            }
+        }
+
         // The lock file is written at once, not after the delay: an overlay
         // preview lasts seconds, and the capturing script needs the window
         // numbers while the windows are still on screen.

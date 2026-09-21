@@ -15,13 +15,14 @@ struct MenuBarPopoverActions {
     var quit: () -> Void = {}
 }
 
-/// The dropdown behind the status item: a header, three sections and nothing
+/// The dropdown behind the status item: a header, four sections and nothing
 /// that moves when the user switches between them.
 ///
-/// Dashboard is everything the window shows at a glance, Windows belongs to
-/// the window manager, Tools holds the one-click actions. The section is
-/// remembered, and it decides what the popover samples: Tools asks for the
-/// fans alone, Windows for nothing at all.
+/// Dashboard is everything the window shows at a glance, Fans is the thermal
+/// readouts with the control of every fan, Windows belongs to the window
+/// manager, Tools holds the one-click actions. The section is remembered, and
+/// it decides what the popover samples: Fans asks for the temperatures, the
+/// fans and the power, Tools for the fans alone, Windows for nothing at all.
 struct MenuBarPopoverView: View {
     let services: AppServices
     var actions = MenuBarPopoverActions()
@@ -69,7 +70,9 @@ struct MenuBarPopoverView: View {
     private var content: some View {
         switch section {
         case .dashboard:
-            PopoverDashboard(services: services, actions: actions, open: open)
+            PopoverDashboard(services: services, open: open)
+        case .fans:
+            PopoverFans(services: services, actions: actions, open: open)
         case .windows:
             PopoverWindows(services: services, actions: actions, open: open)
         case .tools:
@@ -108,7 +111,7 @@ struct MenuBarPopoverView: View {
         .padding(.horizontal, PopoverLayout.padding)
     }
 
-    /// Cmd-1, Cmd-2 and Cmd-3 switch sections. Zero-sized and clipped: the
+    /// Cmd-1 to Cmd-4 switch sections. Zero-sized and clipped: the
     /// buttons are in the hierarchy so the shortcuts register, and they draw
     /// nothing and catch no click.
     private var shortcuts: some View {
@@ -124,22 +127,26 @@ struct MenuBarPopoverView: View {
     }
 }
 
-/// The three sections, drawn by hand.
+/// The four sections, drawn by hand.
 ///
 /// Not `Picker(.segmented)`: that is an `NSSegmentedControl`, and
 /// `ImageRenderer` draws an empty box for an AppKit-backed view, which is the
 /// path every popover screenshot goes through.
+///
+/// Four segments share 356 pt, so each title has 89 pt for an icon and a word.
+/// `PopoverLayoutTests` measures the longest of them against that width: a
+/// fifth section, or a longer title, truncates before it looks wrong.
 struct PopoverSectionPicker: View {
     let selection: PopoverSection
     let select: (PopoverSection) -> Void
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: PopoverLayout.segmentSpacing) {
             ForEach(PopoverSection.allCases) { section in
                 segment(section)
             }
         }
-        .padding(3)
+        .padding(PopoverLayout.pickerPadding)
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.28))

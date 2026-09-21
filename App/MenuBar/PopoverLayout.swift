@@ -10,26 +10,44 @@ enum PopoverLayout {
     static let sectionSpacing: CGFloat = 12
     /// Every clickable thing is at least this tall.
     static let hitTarget: CGFloat = 28
-    /// The height the three sections share.
+    /// The inset of the segmented control around its segments, and the gap
+    /// between two of them. `PopoverSectionPicker` draws with these, and
+    /// `PopoverLayoutTests` measures the titles against the width they leave.
+    static let pickerPadding: CGFloat = 3
+    static let segmentSpacing: CGFloat = 2
+
+    /// The height the four sections share.
     ///
     /// A fixed height rather than an animated resize: an `NSPopover` that
     /// changes size re-lays out and re-anchors under the status item, so the
-    /// panel jumps on every switch, and the three sections differ by hundreds
+    /// panel jumps on every switch, and the four sections differ by hundreds
     /// of points today. With one height the header, the segmented control and
     /// all four edges stay exactly where they are, whichever section is on
     /// screen, and a screenshot of one section is comparable with the next.
     ///
-    /// It is the Dashboard, the tallest of the three, that sets it: its five
+    /// It is the Dashboard, the tallest of the four, that sets it: its five
     /// sections and the four hairlines between them are exactly this tall.
-    /// The Windows and Tools sections spread their rows over the same height.
+    /// Fans, Windows and Tools spread their rows over the same height.
     /// The header, the tab control and the two hairlines add 92 pt, so the
     /// popover is 600 pt tall, inside the 620 pt limit.
+    ///
+    /// The number has not moved since the Dashboard was built, and it may not:
+    /// the Windows section fills it to the last row, and 42 pt less clipped
+    /// "Next Display" off the bottom of the list.
     static let contentHeight: CGFloat = 508
     /// The header, the segmented control and the two hairlines between them.
     static let chromeHeight: CGFloat = 92
     /// The whole panel. A constant, and every frame inside it is one too: see
     /// `DashboardHeight`.
     static let panelHeight: CGFloat = contentHeight + chromeHeight
+
+    /// The width one segment of the section picker gets, with the padding of
+    /// the panel, the inset of the control and the gaps taken off.
+    static func segmentWidth(count: Int) -> CGFloat {
+        let gaps = segmentSpacing * CGFloat(max(0, count - 1))
+        let inner = width - padding * 2 - pickerPadding * 2 - gaps
+        return inner / CGFloat(count)
+    }
 
     /// The height of each Dashboard section, in the order they are drawn.
     ///
@@ -49,14 +67,48 @@ enum PopoverLayout {
         static let cpu: CGFloat = 74
         static let memory: CGFloat = 80
         static let storage: CGFloat = 80
-        static let thermals: CGFloat = 154
+        static let battery: CGFloat = 154
         static let processes: CGFloat = 116
-        static let all: [CGFloat] = [cpu, memory, storage, thermals, processes]
-        /// The slot inside the Thermals section that holds either the fan rows
-        /// or the one state line that stands in for them. Two fan rows are the
-        /// tallest thing it can hold - two caption lines and the row spacing
-        /// between them - and a two-line hint with a small button beside it is
-        /// shorter, so no fan state makes the section grow.
-        static let fanSlot: CGFloat = 34
+        static let all: [CGFloat] = [cpu, memory, storage, battery, processes]
+
+        /// The five rows of the Battery section. Every one of them is a fixed
+        /// box: the percentage, the level bar, the line that says what the
+        /// battery is doing, the three numbers that move, and the two that do
+        /// not. A Mac with no battery fills the same five boxes, so the
+        /// section is the same height on every machine.
+        static let batteryValue: CGFloat = 22
+        static let batteryBar: CGFloat = 8
+        static let batteryState: CGFloat = 20
+        static let batteryStats: CGFloat = 34
+        static let batteryDetail: CGFloat = 14
+    }
+
+    /// The Fans section, which spends the same `contentHeight` on one row of
+    /// readouts, up to two fan cards, one notice and the two commands.
+    ///
+    /// Every group is a fixed box for the same reason the Dashboard's are: the
+    /// rpm of a fan changes every two seconds, and no sample may cost a
+    /// measurement of the panel around it.
+    enum FansHeight {
+        /// The title beside the CPU, GPU and power readouts.
+        static let header: CGFloat = 34
+        /// Between the four groups.
+        static let gap: CGFloat = 14
+        /// The cards share this, whether there are two of them or one.
+        static let cards: CGFloat = 342
+        static let card: CGFloat = 167
+        static let cardPadding: CGFloat = 12
+        /// Inside a card, one `rowSpacing` apart: the name with the live rpm,
+        /// the min-max gauge, the mode control and the editor of that mode.
+        static let cardHead: CGFloat = 24
+        static let cardGauge: CGFloat = 15
+        static let cardSegments: CGFloat = 26
+        static let cardDetail: CGFloat = 54
+        /// One row of the editor: a slider, a picker or a pair of steppers.
+        static let cardDetailRow: CGFloat = 23
+        /// The helper state, a refused command or the quiet summary. Always
+        /// there, so a refusal that arrives mid-sample resizes nothing.
+        static let notice: CGFloat = 34
+        static let buttons: CGFloat = 32
     }
 }

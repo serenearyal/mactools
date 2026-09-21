@@ -36,8 +36,15 @@ struct WindowTarget {
     }
 
     /// "Safari - Inbox", the line the header card shows.
+    ///
+    /// `--demo-window-title <text>` replaces the real title in a capture run:
+    /// a screenshot for the README must not publish what the user had open.
     var label: String {
-        title.isEmpty ? appName : "\(appName) - \(title)"
+        let arguments = CommandLine.arguments
+        if let index = arguments.firstIndex(of: "--demo-window-title"), index + 1 < arguments.count {
+            return "\(appName) - \(arguments[index + 1])"
+        }
+        return title.isEmpty ? appName : "\(appName) - \(title)"
     }
 
     var sizeText: String {

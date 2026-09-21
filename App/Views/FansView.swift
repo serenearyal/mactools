@@ -388,20 +388,14 @@ private struct FanCard: View {
 
     private var storedConstantRPM: Int {
         if case .constant(let rpm) = storedMode { return rpm }
-        return Int(((fan.minimumRPM + fan.maximumRPM) / 2 / 50).rounded() * 50)
+        return FanModeDefaults.constantRPM(for: fan)
     }
 
     private var storedCurve: CurveSettings {
         if case .curve(let key, let start, let maxTemp) = storedMode {
             return CurveSettings(sensorKey: key, startTemp: start, maxTemp: maxTemp)
         }
-        return CurveSettings(sensorKey: defaultSensorKey, startTemp: 45, maxTemp: 85)
-    }
-
-    private var defaultSensorKey: String {
-        store.snapshot.hottestCPU?.key.stringValue
-            ?? store.history.orderedSensors.first?.key.stringValue
-            ?? "Tp01"
+        return FanModeDefaults.curve(for: store)
     }
 
     private var kindBinding: Binding<FanModeKind> {

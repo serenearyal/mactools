@@ -44,27 +44,72 @@ struct SamplingPlanTests {
         #expect(plan == SampleRequest())
     }
 
-    @Test("The popover reads everything it draws")
+    @Test("The Dashboard reads everything it draws, and no sensor at all")
     func popoverRequest() {
         let plan = request(SamplingDemand(consumers: .popover))
         #expect(plan.cpu)
         #expect(plan.memory)
         #expect(plan.diskSpace)
         #expect(plan.diskIO)
-        #expect(plan.fans)
-        // The two dies it draws, not the labelled set: the SSD, the battery
-        // and the enclosure sensors belong to the Sensors tab.
-        #expect(plan.temperatures == .cpuGPU)
-        #expect(plan.power == .system)
+        #expect(plan.battery)
+        // The thermals and the fans moved to the Fans section, and with them
+        // the driver round trips: the only temperature left in this pass is the
+        // one the menu bar label asked for.
+        #expect(!SamplingPlan.popoverRequest.fans)
+        #expect(SamplingPlan.popoverRequest.temperatures == .none)
+        #expect(SamplingPlan.popoverRequest.power == .none)
+        #expect(plan.temperatures == .cpu)
+        #expect(!plan.fans)
     }
 
-    @Test("The popover reads a third of the sensors the Overview does")
+    @Test("The Fans section reads the dies, the fans and the system power")
+    func popoverFansRequest() {
+        let plan = SamplingPlan.popoverRequest(section: .fans)
+        #expect(plan.fans)
+        #expect(plan.temperatures == .cpuGPU)
+        #expect(plan.power == .system)
+        // The CPU is the menu bar label's, and the section draws no memory, no
+        // disk and no battery.
+        #expect(!plan.cpu)
+        #expect(!plan.memory)
+        #expect(!plan.diskSpace)
+        #expect(!plan.diskIO)
+        #expect(!plan.battery)
+    }
+
+    @Test("The Fans section reads a third of the sensors the Overview does")
     func popoverSensorScope() {
-        #expect(SamplingPlan.popoverRequest.temperatures == .cpuGPU)
+        #expect(SamplingPlan.popoverRequest(section: .fans).temperatures == .cpuGPU)
         #expect(TemperatureScope.cpu < .cpuGPU)
         #expect(TemperatureScope.cpuGPU < .labelled)
         // Narrow scopes may never prune a sensor trace they did not read.
         #expect(!TemperatureScope.cpuGPU.namesEverySensor)
+    }
+
+    @Test("A curve on a sensor outside the dies widens the Fans section")
+    func curveSensorScope() {
+        // A die, which the section already reads.
+        #expect(SamplingPlan.curveSensorScope(sensorKeys: ["Tp01", "Tg05"]) == .cpuGPU)
+        #expect(SamplingPlan.curveSensorScope(sensorKeys: []) == .cpuGPU)
+        // The SSD and the enclosure are only in the labelled set, and a curve
+        // editor that draws a dash where its own sensor should be is the one
+        // thing this section must not do.
+        #expect(SamplingPlan.curveSensorScope(sensorKeys: ["TH0x"]) == .labelled)
+        #expect(SamplingPlan.curveSensorScope(sensorKeys: ["Tp01", "TH0x"]) == .labelled)
+        // A key no table knows is read with the labelled set as well, exactly
+        // as the Fans tab of the window reads it. The catalog costs 0.8 s and a
+        // popover never pays it.
+        let unknown = SamplingPlan.curveSensorScope(sensorKeys: ["Zz99"])
+        #expect(unknown == .labelled)
+        #expect(
+            SamplingPlan.popoverRequest(section: .fans, curveSensorScope: .labelled).temperatures
+                == .labelled
+        )
+        // And it never narrows the section below the two dies it draws.
+        #expect(
+            SamplingPlan.popoverRequest(section: .fans, curveSensorScope: .cpu).temperatures
+                == .cpuGPU
+        )
     }
 
     @Test("A pass that comes round too soon leaves the sensors alone")
@@ -116,11 +161,23 @@ struct SamplingPlanTests {
         #expect(!SamplingPlan.popoverRequest(section: .tools).cpu)
     }
 
-    @Test("Every popover section asks for at most what the Dashboard asks for")
+    @Test("No popover section asks for more than one open window does")
     func popoverSectionsAreSubsets() {
-        let dashboard = SamplingPlan.popoverRequest(section: .dashboard)
+        // The window reads the labelled set with every fan and every rail; the
+        // battery is the popover's own, so the ceiling is that plus the
+        // battery. A section that asked for more than this would be reading
+        // something nothing draws.
+        var ceiling = SamplingPlan.windowRequest(tab: .overview, showsUnlabelledSensors: false)
+        ceiling.power = .labelled
+        ceiling.battery = true
         for section in PopoverSection.allCases {
-            #expect(dashboard.union(SamplingPlan.popoverRequest(section: section)) == dashboard)
+            let plan = SamplingPlan.popoverRequest(section: section, curveSensorScope: .labelled)
+            #expect(ceiling.union(plan) == ceiling, "\(section.rawValue) reads too much")
+        }
+        // And each section really is narrower than the popover as a whole: no
+        // section reads every domain.
+        for section in PopoverSection.allCases {
+            #expect(SamplingPlan.popoverRequest(section: section) != ceiling)
         }
     }
 
@@ -167,10 +224,13 @@ struct SamplingPlanTests {
         #expect(request(tab, unlabelled: true).temperatures == .everything)
         #expect(request(tab).temperatures == .labelled)
         // A popover over a hidden window whose selected tab is Sensors: the
-        // tab is nobody looking, so the catalog stays unread and the popover
-        // gets the two dies it draws.
+        // tab is nobody looking, so the catalog stays unread and the Dashboard
+        // adds no sensor of its own to the one the label draws.
         let popover = SamplingDemand(consumers: .popover, activeTab: .sensors)
-        #expect(request(popover, unlabelled: true).temperatures == .cpuGPU)
+        #expect(request(popover, unlabelled: true).temperatures == .cpu)
+        // The Fans section is the one that draws dies.
+        let fans = SamplingDemand(consumers: .popover, activeTab: .sensors, popoverSection: .fans)
+        #expect(request(fans, unlabelled: true).temperatures == .cpuGPU)
     }
 
     @Test("Two consumers read the superset, never less than either alone")
@@ -179,8 +239,16 @@ struct SamplingPlanTests {
         let plan = request(both, unlabelled: true)
         #expect(plan.temperatures == .everything)
         #expect(plan.power == .labelled)
-        #expect(plan.fans)
         #expect(plan.memory)
+        // The battery comes from the Dashboard section, which the window knows
+        // nothing about.
+        #expect(plan.battery)
+        // The Sensors tab reads no fan, so the fans are the popover section's
+        // alone: the Fans section adds them, the Dashboard does not.
+        #expect(!plan.fans)
+        var onFans = both
+        onFans.popoverSection = .fans
+        #expect(request(onFans, unlabelled: true).fans)
     }
 
     @Test("A label metric survives a consumer that does not need it")
@@ -325,12 +393,27 @@ struct SamplingPlanTests {
         )
     }
 
-    @Test("Fans poll for the popover and for their own tab only")
+    @Test("Fans poll for the popover sections that draw one, and for their own tab")
     func fanDemand() {
-        #expect(SamplingPlan.pollsFans(SamplingDemand(consumers: .popover)))
+        #expect(
+            SamplingPlan.pollsFans(SamplingDemand(consumers: .popover, popoverSection: .fans))
+        )
+        // The Dashboard lost its fan section, so it lost the XPC round trip
+        // with it.
+        #expect(!SamplingPlan.pollsFans(SamplingDemand(consumers: .popover)))
         #expect(SamplingPlan.pollsFans(SamplingDemand(consumers: .window, activeTab: .fans)))
         #expect(!SamplingPlan.pollsFans(SamplingDemand(consumers: .window, activeTab: .storage)))
         #expect(!SamplingPlan.pollsFans(SamplingDemand(activeTab: .fans)))
+    }
+
+    @Test("A pass that comes round too soon leaves the battery alone")
+    func batteryFloor() {
+        #expect(SamplingPlan.throttlesBattery(sinceLastRead: .seconds(1)))
+        #expect(SamplingPlan.throttlesBattery(sinceLastRead: .seconds(29)))
+        #expect(!SamplingPlan.throttlesBattery(sinceLastRead: .seconds(30)))
+        #expect(!SamplingPlan.throttlesBattery(sinceLastRead: .seconds(600)))
+        // Much longer than the sensor floor: a percentage moves in minutes.
+        #expect(SamplingPlan.batteryFloor > SamplingPlan.temperatureFloor)
     }
 
     @Test("Closing the popover restores exactly the idle plan")
@@ -602,7 +685,7 @@ struct SamplingPlanTests {
                 SamplingDemand(consumers: .popover, popoverSection: .dashboard)
             )
         )
-        for section in [PopoverSection.windows, .tools] {
+        for section in [PopoverSection.fans, .windows, .tools] {
             #expect(
                 !SamplingPlan.samplesProcesses(
                     SamplingDemand(consumers: .popover, popoverSection: section)
@@ -612,13 +695,16 @@ struct SamplingPlanTests {
         }
     }
 
-    @Test("Fans poll for the Dashboard and the Tools sections, never for Windows")
+    @Test("Fans poll for the Fans and the Tools sections, never for Dashboard or Windows")
     func fanDemandPerSection() {
         #expect(
-            SamplingPlan.pollsFans(SamplingDemand(consumers: .popover, popoverSection: .dashboard))
+            SamplingPlan.pollsFans(SamplingDemand(consumers: .popover, popoverSection: .fans))
         )
         #expect(
             SamplingPlan.pollsFans(SamplingDemand(consumers: .popover, popoverSection: .tools))
+        )
+        #expect(
+            !SamplingPlan.pollsFans(SamplingDemand(consumers: .popover, popoverSection: .dashboard))
         )
         #expect(
             !SamplingPlan.pollsFans(SamplingDemand(consumers: .popover, popoverSection: .windows))
@@ -861,14 +947,30 @@ struct MainTabTests {
         }
     }
 
-    @Test("`--popover-section` takes the three section names")
+    @Test("`--popover-section` takes every section name")
     func popoverSectionArgument() {
         for section in PopoverSection.allCases {
             #expect(PopoverSection(argument: section.rawValue) == section)
             #expect(PopoverSection(argument: section.rawValue.uppercased()) == section)
         }
         #expect(PopoverSection(argument: "nonsense") == nil)
-        // Cmd-1, Cmd-2, Cmd-3, in the order of the segmented control.
-        #expect(PopoverSection.allCases.map(\.shortcutKey) == ["1", "2", "3"])
+        // The order of the segmented control, and Cmd-1 to Cmd-4 along it.
+        #expect(PopoverSection.allCases == [.dashboard, .fans, .windows, .tools])
+        #expect(PopoverSection.allCases.map(\.shortcutKey) == ["1", "2", "3", "4"])
+        #expect(PopoverSection.fans.title == "Fans")
+        #expect(PopoverSection.fans.symbolName == "fan")
+    }
+
+    @Test("A stored section this build does not have falls back to the Dashboard")
+    func popoverSectionDecoding() throws {
+        func decode(_ json: String) throws -> PopoverSection {
+            try JSONDecoder().decode(PopoverSection.self, from: Data(json.utf8))
+        }
+        #expect(try decode("\"fans\"") == .fans)
+        // A settings file written by a later build names a section this one
+        // never had. Throwing here would take every other setting in the file
+        // down with it.
+        #expect(try decode("\"thermals\"") == .dashboard)
+        #expect(try decode("\"\"") == .dashboard)
     }
 }

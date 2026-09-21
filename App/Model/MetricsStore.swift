@@ -31,6 +31,10 @@ final class MetricsStore {
     private(set) var temperatures: [TemperatureReading] = []
     private(set) var fans: [FanReading] = []
     private(set) var power: [PowerReading] = []
+    /// nil on a Mac with no battery, and until the first pass that asks for
+    /// one. The Battery section of the popover is not drawn at all while it is
+    /// nil, which is what a Mac mini shows.
+    private(set) var battery: BatteryReading?
     private(set) var smcAvailable = true
     private(set) var history = MetricsHistory()
     private(set) var topology = CoreTopology.current()
@@ -47,6 +51,7 @@ final class MetricsStore {
     @ObservationIgnored private var sampleTask: Task<Void, Never>?
     @ObservationIgnored private var lastVolumeSample = Date.distantPast
     @ObservationIgnored private var lastTemperatureSample = Date.distantPast
+    @ObservationIgnored private var lastBatterySample = Date.distantPast
     @ObservationIgnored private var asleep = false
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
@@ -55,6 +60,9 @@ final class MetricsStore {
 
     /// Disk capacity moves slowly and the scan walks every mount point.
     private static let volumeInterval: TimeInterval = 5
+    /// How many fan slots the stored modes are looked up for. The Mac Pro has
+    /// six fans; eight is room to spare for eight dictionary lookups.
+    private static let maximumFanIndex = 8
 
     // MARK: - What the views read
 
@@ -70,6 +78,7 @@ final class MetricsStore {
             temperatures: temperatures,
             fans: fans,
             power: power,
+            battery: battery,
             smcAvailable: smcAvailable
         )
     }
@@ -88,6 +97,7 @@ final class MetricsStore {
             temperatures: request.temperatures == .none ? [] : temperatures,
             fans: request.fans ? fans : [],
             power: request.power == .none ? [] : power,
+            battery: request.battery ? battery : nil,
             smcAvailable: smcAvailable
         )
     }
@@ -163,6 +173,9 @@ final class MetricsStore {
     func setPowerConditions(_ conditions: PowerConditions) {
         guard self.conditions != conditions else { return }
         self.conditions = conditions
+        // A plug, an unplug or Low Power Mode is exactly the moment the battery
+        // section is wrong, so the 30 s floor is dropped for the next pass.
+        lastBatterySample = .distantPast
         AppLog.app.info(
             """
             power conditions: battery \(conditions.onBattery, privacy: .public), \
@@ -270,7 +283,8 @@ final class MetricsStore {
             menuBarMetrics: settings.menuBarMetrics,
             chosenSensorScope: scopeForChosenSensor(),
             showsUnlabelledSensors: settings.showUnlabelledSensors,
-            spinsFanIcon: spinsFanIcon
+            spinsFanIcon: spinsFanIcon,
+            curveSensorScope: curveSensorScope()
         )
         if request.diskSpace, Date.now.timeIntervalSince(lastVolumeSample) < MetricsStore.volumeInterval {
             request.diskSpace = false
@@ -284,7 +298,30 @@ final class MetricsStore {
            ) {
             request.temperatures = .none
         }
+        // A battery moves in minutes, and the read is two IOKit dictionary
+        // copies plus a registry walk.
+        if request.battery,
+           SamplingPlan.throttlesBattery(
+               sinceLastRead: .seconds(Date.now.timeIntervalSince(lastBatterySample))
+           ) {
+            request.battery = false
+        }
         return request
+    }
+
+    /// The sensors the user's fan curves follow, which the Fans section of the
+    /// popover has to read whatever else it reads.
+    ///
+    /// Asked of the settings by index rather than of the fans the SMC found:
+    /// the modes are stored per index, and the first pass of a freshly opened
+    /// popover has no fan list yet. A lookup for a fan the Mac does not have
+    /// answers Auto.
+    private func curveSensorScope() -> TemperatureScope {
+        let keys: [String] = (0..<MetricsStore.maximumFanIndex).compactMap { index in
+            guard case .curve(let key, _, _) = settings.fanMode(forFan: index) else { return nil }
+            return key
+        }
+        return SamplingPlan.curveSensorScope(sensorKeys: keys)
     }
 
     /// A chosen CPU sensor needs the cheap CPU scope, anything else needs the
@@ -317,6 +354,10 @@ final class MetricsStore {
         }
         if let value = sample.fans, value != fans { fans = value }
         if let value = sample.power, value != power { power = value }
+        if sample.batteryRead {
+            lastBatterySample = sample.date
+            if let value = sample.battery, value != battery { battery = value }
+        }
         if let value = sample.smcAvailable, value != smcAvailable { smcAvailable = value }
         history.append(sample, snapshot: snapshot)
     }

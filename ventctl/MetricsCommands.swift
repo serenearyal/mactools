@@ -124,6 +124,33 @@ enum MetricsCommands {
         }
     }
 
+    /// Every field of one battery reading, for comparing against `pmset -g
+    /// batt` and `system_profiler SPPowerDataType`.
+    ///
+    /// A field that is not there prints as a dash: an external battery and a
+    /// Mac in a virtual machine answer the `IOPS` half and publish no
+    /// `AppleSmartBattery` entry at all.
+    static func battery() throws {
+        guard let reading = BatterySampler.read() else {
+            throw CLIError("this Mac has no battery")
+        }
+        let time = reading.minutesRemaining.map { minutes in
+            "\(minutes / 60)h \(minutes % 60)m (\(minutes) min)"
+        } ?? "calculating"
+        print("state          \(reading.stateDescription)")
+        print("charge         \(reading.percent) %")
+        print("plugged in     \(reading.isPluggedIn ? "yes" : "no")")
+        print("charging       \(reading.isCharging ? "yes" : "no")")
+        print("charged        \(reading.isCharged ? "yes" : "no")")
+        print("time \(reading.isCharging ? "to full  " : "remaining") \(time)")
+        print("cycles         \(reading.cycleCount.map(String.init) ?? "-")")
+        print("health         \(reading.healthPercent.map { "\($0) %" } ?? "-")")
+        print("temperature    \(reading.temperatureCelsius.map { format($0, 2) + " C" } ?? "-")")
+        print("power          \(reading.watts.map { format($0, 2) + " W" } ?? "-")  (positive is into the battery)")
+        print("adapter        \(reading.adapterWatts.map { "\($0) W" } ?? "-")")
+        print("low power mode \(reading.lowPowerMode ? "on" : "off")")
+    }
+
     /// One line per tick until Ctrl-C. The SMC catalog load costs about a
     /// second, so it happens once before the loop.
     static func watch(interval: Double) throws {

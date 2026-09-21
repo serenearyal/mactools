@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// A small state badge in the popover header, "Awake 42m" and its like.
-///
-/// Nothing sets one yet. The slot it sits in has a fixed height, so the header
-/// does not change when a later batch fills it.
+/// A small state badge: "Awake 42m" in the header, "Low Power Mode" beside the
+/// battery. Every slot that holds one has a fixed height, so a state that
+/// appears between two samples moves nothing around it.
 struct PopoverBadge: Equatable, Sendable {
     let text: String
     let symbolName: String

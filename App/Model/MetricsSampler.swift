@@ -52,6 +52,12 @@ actor MetricsSampler {
         if request.diskIO {
             sample.diskIO = (try? diskIOSampler.sample())?.rates
         }
+        if request.battery {
+            // `batteryRead` and not the value: a Mac with no battery answers
+            // nil for ever, and the store's floor has to move anyway.
+            sample.batteryRead = true
+            sample.battery = BatterySampler.read()
+        }
 
         let needsSMC = request.temperatures != .none || request.fans || request.power != .none
         if needsSMC {
