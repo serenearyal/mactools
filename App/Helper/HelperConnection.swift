@@ -109,6 +109,35 @@ actor HelperConnection {
         }
     }
 
+    // MARK: - Sleep
+
+    /// The system-wide `SleepDisabled` flag and whether Vent is the one
+    /// holding it. Needs the helper: the marker is root-owned.
+    func sleepDisabledState() async throws(HelperConnectionError) -> SleepDisabledReport {
+        let data: Data = try await call { proxy, done in
+            proxy.sleepDisabledState { data, error in
+                if let data {
+                    done(.success(data))
+                } else {
+                    done(.failure(.refused(error ?? "the helper returned no sleep setting and no reason")))
+                }
+            }
+        }
+        guard let report = try? JSONDecoder().decode(SleepDisabledReport.self, from: data) else {
+            throw .refused("the helper sent a sleep setting this app cannot read")
+        }
+        return report
+    }
+
+    /// Sets or clears `SleepDisabled`, which is what keeps this Mac awake with
+    /// the lid closed. A refusal comes back as `.refused`, and the commonest
+    /// one is a flag somebody else set by hand.
+    func setSleepDisabled(_ disabled: Bool) async throws(HelperConnectionError) {
+        try await callVoid { proxy, done in
+            proxy.setSleepDisabled(disabled) { done($0) }
+        }
+    }
+
     // MARK: - Processes
 
     /// The rows of the processes this user does not own, with the counters

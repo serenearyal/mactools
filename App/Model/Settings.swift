@@ -119,6 +119,9 @@ struct SettingsData: Codable, Equatable, Sendable {
     /// back holding this Mac awake after a relaunch.
     var keepAwakeDuration: KeepAwakeDuration = .indefinite
     var keepAwakeDisplay: Bool = false
+    /// "Stay awake with the lid closed". Off until the user asks for it: it
+    /// needs the privileged helper and it changes how the whole Mac behaves.
+    var keepAwakeLidClose: Bool = false
     var keepAwakeBatteryGuard: Bool = true
     var keepAwakeBatteryThreshold: Int = 20
     /// The window manager: the shortcut set, the gap and its two switches.
@@ -167,6 +170,8 @@ struct SettingsData: Codable, Equatable, Sendable {
             ?? fallback.keepAwakeDuration
         keepAwakeDisplay = try container.decodeIfPresent(Bool.self, forKey: .keepAwakeDisplay)
             ?? fallback.keepAwakeDisplay
+        keepAwakeLidClose = try container.decodeIfPresent(Bool.self, forKey: .keepAwakeLidClose)
+            ?? fallback.keepAwakeLidClose
         keepAwakeBatteryGuard = try container.decodeIfPresent(Bool.self, forKey: .keepAwakeBatteryGuard)
             ?? fallback.keepAwakeBatteryGuard
         keepAwakeBatteryThreshold = (
@@ -249,6 +254,7 @@ final class AppSettings {
             KeepAwakeOptions(
                 duration: data.keepAwakeDuration,
                 keepDisplayOn: data.keepAwakeDisplay,
+                lidClose: data.keepAwakeLidClose,
                 batteryGuardEnabled: data.keepAwakeBatteryGuard,
                 batteryThreshold: data.keepAwakeBatteryThreshold
                     .clamped(to: KeepAwakeOptions.thresholdRange)
@@ -257,6 +263,7 @@ final class AppSettings {
         set {
             data.keepAwakeDuration = newValue.duration
             data.keepAwakeDisplay = newValue.keepDisplayOn
+            data.keepAwakeLidClose = newValue.lidClose
             data.keepAwakeBatteryGuard = newValue.batteryGuardEnabled
             data.keepAwakeBatteryThreshold = newValue.batteryThreshold
                 .clamped(to: KeepAwakeOptions.thresholdRange)

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Synchronization
 import os
 
 import FanControl
@@ -49,9 +50,22 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
     /// answers with `fanError`.
     let fans: FanCoordinator?
     private let fanError: String?
+    /// The system-wide sleep setting, with its ownership marker and its
+    /// restore guarantees. Nil in a build that has no business writing it.
+    let sleep: SleepDisabledGovernor?
     /// False only for the XPC round-trip test, which runs as a normal user
     /// against a fake. The daemon always builds itself through `init()`.
     private let requiresRoot: Bool
+    /// The signal sources of the termination guarantees, kept alive for the
+    /// life of the process.
+    private let signalSources = Mutex<[DispatchSourceSignal]>([])
+    private let terminationQueue = DispatchQueue(
+        label: "\(HelperConstants.helperBundleIdentifier).termination"
+    )
+
+    /// The one service of the process, for the C-level handlers that have
+    /// nowhere to carry context.
+    static let shared = Mutex<HelperService?>(nil)
 
     /// The designated initializer. Everything this service talks to is handed
     /// to it: it opens no SMC connection and looks for no fan by itself.
@@ -65,6 +79,7 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
         smcError: String?,
         fanHardware: (any FanHardware)?,
         fanError: String?,
+        sleep: SleepDisabledGovernor?,
         requiresRoot: Bool
     ) {
         self.requiresRoot = requiresRoot
@@ -72,19 +87,90 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
         self.smcError = smcError
         fans = fanHardware.map { FanCoordinator(hardware: $0) }
         self.fanError = fans == nil ? (fanError ?? "the fans are not reachable") : nil
+        self.sleep = sleep
         super.init()
     }
 
     /// The service a test builds: fans that exist only in the caller's
-    /// process, and no SMC connection of any kind.
-    convenience init(fanHardware: any FanHardware, requiresRoot: Bool) {
+    /// process, a sleep setting that exists only in memory, and no SMC
+    /// connection of any kind.
+    convenience init(
+        fanHardware: any FanHardware,
+        sleep: SleepDisabledGovernor? = nil,
+        requiresRoot: Bool
+    ) {
         self.init(
             smc: nil,
             smcError: "this build of the helper has no SMC connection",
             fanHardware: fanHardware,
             fanError: nil,
+            sleep: sleep,
             requiresRoot: requiresRoot
         )
+    }
+
+    // MARK: - Lifetime
+
+    /// Guarantee 2 for both the fans and the sleep setting: SIGTERM, SIGINT,
+    /// SIGHUP and every other way out put this Mac back the way it was found.
+    ///
+    /// `SIG_IGN` first, because a `DispatchSourceSignal` only sees the signal
+    /// once the default action is out of the way, and that default is to kill
+    /// the process before anything is restored.
+    ///
+    /// One owner for both, and it is this class: two sets of handlers on one
+    /// signal would race to call `exit(0)`, and the loser would restore
+    /// nothing. The fans keep their own hardware knowledge; this decides when.
+    func installTerminationHandlers() {
+        let sources = [SIGTERM, SIGINT, SIGHUP].map { number -> DispatchSourceSignal in
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: terminationQueue)
+            source.setEventHandler { [weak self] in
+                self?.log.notice(
+                    "signal \(number, privacy: .public): clearing sleep disabled, every fan to Auto"
+                )
+                self?.sleep?.clearForTermination()
+                self?.fans?.restoreAllAutoOnSignal()
+                exit(0)
+            }
+            source.resume()
+            return source
+        }
+        signalSources.withLock { $0 = sources }
+
+        HelperService.shared.withLock { $0 = self }
+        // The last net: a normal exit, or one from a path that did not go
+        // through a signal. A C function pointer carries no context, hence the
+        // static above.
+        atexit {
+            guard let service = HelperService.shared.withLock({ $0 }) else { return }
+            service.sleep?.clearForTermination()
+            service.fans?.restoreAllAutoNow()
+        }
+    }
+
+    /// Guarantee 3 at start, for both: whatever a previous run left behind is
+    /// undone before the first client can connect.
+    func restoreAtStart() {
+        sleep?.recoverAtStart()
+        fans?.startWithAutoRestore()
+    }
+
+    /// Guarantee 1: one token per XPC connection, so the last client to leave
+    /// takes the fans and the sleep setting with it.
+    func clientArrived() -> ClientTokens {
+        ClientTokens(fans: fans?.clientArrived(), sleep: sleep?.clientArrived())
+    }
+
+    func clientLeft(_ tokens: ClientTokens) {
+        if let token = tokens.fans { fans?.clientLeft(token: token) }
+        if let token = tokens.sleep { sleep?.clientLeft(token: token) }
+    }
+
+    /// The tokens of one connection: one per thing that has to be given back.
+    struct ClientTokens: Sendable {
+        let fans: UInt64?
+        let sleep: UInt64?
     }
 
     // MARK: - VentHelperProtocol
@@ -157,6 +243,58 @@ final class HelperService: NSObject, VentHelperProtocol, @unchecked Sendable {
         }
         reply(fans.restoreAllAuto())
     }
+
+    // MARK: - Sleep
+
+    /// The `SleepDisabled` flag and who owns it. Read only, and it needs root
+    /// like everything else here: `IOPMCopySystemPowerSettings` is readable by
+    /// anyone, but the marker that says whether Vent set it is not.
+    func sleepDisabledState(reply: @escaping @Sendable (Data?, String?) -> Void) {
+        if let failure = privilegeFailure() {
+            reply(nil, failure)
+            return
+        }
+        guard let sleep else {
+            reply(nil, Self.noSleepControl)
+            return
+        }
+        guard let report = sleep.report() else {
+            reply(nil, "the power manager would not say whether sleep is disabled")
+            return
+        }
+        guard let data = try? JSONEncoder().encode(report) else {
+            reply(nil, "the sleep setting could not be encoded")
+            return
+        }
+        reply(data, nil)
+    }
+
+    /// The one write in this helper that changes how the whole Mac behaves, so
+    /// every call is logged with the client that asked for it.
+    ///
+    /// Clearing is never refused for lack of root in spirit - but it does need
+    /// root to happen at all, so the gate stands and the answer says so.
+    func setSleepDisabled(_ disabled: Bool, reply: @escaping @Sendable (String?) -> Void) {
+        if let failure = privilegeFailure() {
+            reply(failure)
+            return
+        }
+        guard let sleep else {
+            reply(Self.noSleepControl)
+            return
+        }
+        let client = NSXPCConnection.current()?.processIdentifier ?? -1
+        let failure = sleep.set(disabled)
+        log.notice(
+            """
+            sleep disabled \(disabled ? "set" : "cleared", privacy: .public) for client pid \
+            \(client, privacy: .public): \(failure ?? "done", privacy: .public)
+            """
+        )
+        reply(failure)
+    }
+
+    private static let noSleepControl = "this build of the helper does not control the sleep setting"
 
     // MARK: - Processes
 

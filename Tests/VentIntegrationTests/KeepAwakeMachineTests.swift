@@ -17,6 +17,10 @@ struct KeepAwakeMachineTests {
         private(set) var creates: [AssertionRequest] = []
         private(set) var releases = 0
         private(set) var expiry: Date?
+        /// Every lid request, in order. The helper is not called here: what
+        /// matters is that the machine asks once per change and never twice.
+        private(set) var lidRequests: [Bool] = []
+        private(set) var lidHeld = false
 
         var current: AssertionRequest? { creates.last }
 
@@ -31,6 +35,9 @@ struct KeepAwakeMachineTests {
                     isHolding = true
                 case .scheduleExpiry(let date):
                     expiry = date
+                case .lid(let on):
+                    lidRequests.append(on)
+                    lidHeld = on
                 }
             }
         }
@@ -49,6 +56,7 @@ struct KeepAwakeMachineTests {
     private func machine(
         duration: KeepAwakeDuration = .indefinite,
         display: Bool = false,
+        lidClose: Bool = false,
         guardOn: Bool = true,
         threshold: Int = 20,
         power: PowerStatus? = nil
@@ -56,6 +64,7 @@ struct KeepAwakeMachineTests {
         let options = KeepAwakeOptions(
             duration: duration,
             keepDisplayOn: display,
+            lidClose: lidClose,
             batteryGuardEnabled: guardOn,
             batteryThreshold: threshold
         )
@@ -165,6 +174,127 @@ struct KeepAwakeMachineTests {
         backend.play(machine.handle(.optionsChanged(options, now: start)))
         #expect(machine.state == .off)
         #expect(backend.creates.isEmpty)
+    }
+
+    // MARK: - The lid hold
+
+    /// The user's own command is `sudo pmset disablesleep 1`, and this is the
+    /// switch that asks the helper for the same thing.
+    @Test("With the lid option on, turning Keep Awake on asks for the flag once")
+    func lidHoldFollowsTheSwitch() {
+        var (machine, backend) = machine(lidClose: true)
+        backend.play(machine.handle(.turnOn(now: start)))
+        #expect(backend.lidRequests == [true])
+        #expect(machine.lidRequested)
+
+        // Nothing the assertion carries changed, so no second request.
+        var options = machine.options
+        options.batteryThreshold = 35
+        backend.play(machine.handle(.optionsChanged(options, now: start.addingTimeInterval(60))))
+        #expect(backend.lidRequests == [true])
+
+        backend.play(machine.handle(.turnOff))
+        #expect(backend.lidRequests == [true, false])
+        #expect(!machine.lidRequested)
+    }
+
+    @Test("Without the lid option, the flag is never asked for")
+    func lidStaysOutOfTheWay() {
+        var (machine, backend) = machine()
+        backend.play(machine.handle(.turnOn(now: start)))
+        backend.play(machine.handle(.turnOff))
+        #expect(backend.lidRequests.isEmpty)
+    }
+
+    @Test("Switching the lid option on while Keep Awake runs takes the flag there and then")
+    func lidOptionWhileOn() {
+        var (machine, backend) = machine()
+        backend.play(machine.handle(.turnOn(now: start)))
+        #expect(backend.lidRequests.isEmpty)
+
+        var options = machine.options
+        options.lidClose = true
+        backend.play(machine.handle(.optionsChanged(options, now: start.addingTimeInterval(60))))
+        #expect(backend.lidRequests == [true])
+        // And the assertion was not re-created for an option it does not carry.
+        #expect(backend.creates.count == 1)
+
+        options.lidClose = false
+        backend.play(machine.handle(.optionsChanged(options, now: start.addingTimeInterval(120))))
+        #expect(backend.lidRequests == [true, false])
+    }
+
+    @Test("The lid option alone holds nothing while Keep Awake is off")
+    func lidNeedsKeepAwake() {
+        var (machine, backend) = machine()
+        var options = machine.options
+        options.lidClose = true
+        backend.play(machine.handle(.optionsChanged(options, now: start)))
+        #expect(backend.lidRequests.isEmpty)
+        #expect(!machine.lidRequested)
+    }
+
+    @Test("The timeout takes the flag with it")
+    func lidEndsWithTheTimeout() {
+        var (machine, backend) = machine(duration: .minutes(1), lidClose: true)
+        backend.play(machine.handle(.turnOn(now: start)))
+        backend.play(machine.handle(.expired))
+        #expect(backend.lidRequests == [true, false])
+        #expect(!backend.lidHeld)
+    }
+
+    @Test("The battery guard takes the flag with it, and gives it back with the assertion")
+    func lidFollowsTheGuard() {
+        var (machine, backend) = machine(lidClose: true, threshold: 20)
+        backend.play(machine.handle(.turnOn(now: start)))
+        backend.play(machine.handle(.power(onBattery(18), now: start.addingTimeInterval(60))))
+        #expect(machine.state == .off)
+        #expect(backend.lidRequests == [true, false])
+
+        backend.play(machine.handle(.power(plugged(50), now: start.addingTimeInterval(120))))
+        #expect(machine.state.isOn)
+        #expect(backend.lidRequests == [true, false, true])
+    }
+
+    /// A closed Mac that cannot sleep cooks in a bag. The charge guard can be
+    /// switched off; this one cannot, and it fires a notch earlier than the
+    /// critical state that releases the assertion itself.
+    @Test("A serious thermal state clears the flag while the assertion stays")
+    func lidReleasesOnAHotMac() {
+        var (machine, backend) = machine(lidClose: true)
+        backend.play(machine.handle(.turnOn(now: start)))
+        backend.play(
+            machine.handle(
+                .power(
+                    PowerStatus(percent: 80, onBattery: false, thermal: .serious),
+                    now: start.addingTimeInterval(60)
+                )
+            )
+        )
+        #expect(machine.state.isOn, "a serious thermal state is not critical: the assertion stays")
+        #expect(backend.isHolding)
+        #expect(backend.lidRequests == [true, false])
+
+        // And it comes back when the Mac cools down.
+        backend.play(machine.handle(.power(plugged(80), now: start.addingTimeInterval(600))))
+        #expect(backend.lidRequests == [true, false, true])
+    }
+
+    @Test("A critical thermal state takes both")
+    func lidReleasesWhenCritical() {
+        var (machine, backend) = machine(lidClose: true)
+        backend.play(machine.handle(.turnOn(now: start)))
+        backend.play(
+            machine.handle(
+                .power(
+                    PowerStatus(percent: 80, onBattery: false, thermal: .critical),
+                    now: start.addingTimeInterval(60)
+                )
+            )
+        )
+        #expect(machine.state == .off)
+        #expect(!backend.isHolding)
+        #expect(backend.lidRequests == [true, false])
     }
 
     // MARK: - The battery guard

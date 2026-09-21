@@ -56,6 +56,9 @@ struct PopoverTools: View {
 
     // MARK: - Keep Awake
 
+    /// The second line says what is blocked right now, read back from the
+    /// power manager: "Idle sleep blocked", or "Idle sleep and lid-close sleep
+    /// blocked" when the helper holds the system-wide setting too.
     private var keepAwakeRow: some View {
         ToolRow(
             title: "Keep Awake",
@@ -80,6 +83,10 @@ struct PopoverTools: View {
                     .help(keepAwake.isOn ? "Let this Mac sleep again" : "Hold this Mac awake")
             }
         }
+        // The popover is the one surface that can be open while nothing else
+        // is, so it asks for its own read-back rather than trusting a timer
+        // that only runs while the tab is on screen.
+        .onAppear { keepAwake.verifyNow() }
     }
 
     private var awakeBinding: Binding<Bool> {

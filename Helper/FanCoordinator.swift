@@ -14,23 +14,21 @@ import HelperProtocol
 ///    which is also how Macs Fan Control behaves, and it is what makes
 ///    `kill -9` of the app safe.
 /// 2. SIGTERM, SIGINT or SIGHUP, plus `atexit` for every other way out.
+///    `HelperService` owns those handlers now, because the sleep setting has
+///    to come off in the same breath and two sets of handlers on one signal
+///    would race to `exit(0)`; the two entry points it calls are here.
 /// 3. Unconditionally at start, before the listener accepts anything.
 /// 4. On the way into sleep; the held modes are written again on wake.
 ///
 /// Concurrency: one serial queue owns every hardware call. The timer fires on
 /// it, and every XPC method hops onto it, so the SMC sees one caller.
 final class FanCoordinator: Sendable {
-    /// The one coordinator of the process, for the C-level handlers that have
-    /// nowhere to carry context.
-    static let shared = Mutex<FanCoordinator?>(nil)
-
     private let governor: FanGovernor
     private let queue = DispatchQueue(label: "\(HelperConstants.helperBundleIdentifier).fans")
     private let timer = Mutex<DispatchSourceTimer?>(nil)
     private let clients = Mutex(FanClientRegistry())
     private let power = Mutex(FanPowerPolicy())
     private let nextToken = Mutex<UInt64>(0)
-    private let signalSources = Mutex<[DispatchSourceSignal]>([])
     private let powerWatcher = PowerWatcher()
     private let log = HelperLog.fans
 
@@ -53,30 +51,16 @@ final class FanCoordinator: Sendable {
         }
     }
 
-    /// Guarantee 2. `SIG_IGN` first, because a `DispatchSourceSignal` only
-    /// sees the signal once the default action is out of the way, and that
-    /// default is to kill the process before anything is restored.
-    func installTerminationHandlers() {
-        let sources = [SIGTERM, SIGINT, SIGHUP].map { number -> DispatchSourceSignal in
-            signal(number, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: number, queue: queue)
-            source.setEventHandler { [weak self] in
-                self?.log.notice("signal \(number, privacy: .public): restoring every fan to Auto")
-                self?.governor.restoreAllAuto()
-                exit(0)
-            }
-            source.resume()
-            return source
-        }
-        signalSources.withLock { $0 = sources }
+    /// Guarantee 2, the signal path. On the fan queue, like every other
+    /// hardware call, so a tick in flight cannot overlap the restore.
+    func restoreAllAutoOnSignal() {
+        queue.sync { governor.restoreAllAuto() }
+    }
 
-        FanCoordinator.shared.withLock { $0 = self }
-        // The last net: a normal exit, or one from a path that did not go
-        // through a signal. A C function pointer carries no context, hence the
-        // static above.
-        atexit {
-            FanCoordinator.shared.withLock { $0 }?.restoreAllAutoNow()
-        }
+    /// Guarantee 2, the `atexit` path. No queue hop: the process is already on
+    /// its way out and the queue may never run again.
+    func restoreAllAutoNow() {
+        governor.restoreAllAuto()
     }
 
     // MARK: - What the XPC methods call
@@ -113,12 +97,6 @@ final class FanCoordinator: Sendable {
         }
         log.notice("every fan restored to Auto")
         return nil
-    }
-
-    /// The `atexit` path. No queue hop: the process is already on its way out
-    /// and the queue may never run again.
-    private func restoreAllAutoNow() {
-        governor.restoreAllAuto()
     }
 
     // MARK: - Clients

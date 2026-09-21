@@ -8,11 +8,11 @@ import HelperProtocol
 // it keeps ticking between calls.
 let service = HelperService.daemon()
 
-// Order matters. Every fan is put back under firmware control (guarantee 3)
-// and the ways out are armed (guarantee 2) before the first client can ask
-// for anything.
-service.fans?.installTerminationHandlers()
-service.fans?.startWithAutoRestore()
+// Order matters. The ways out are armed (guarantee 2), then every fan is put
+// back under firmware control and a sleep setting a previous run left behind
+// is cleared (guarantee 3), all before the first client can ask for anything.
+service.installTerminationHandlers()
+service.restoreAtStart()
 
 let delegate = HelperListenerDelegate(service: service)
 let listener = NSXPCListener(machServiceName: HelperConstants.machServiceName)

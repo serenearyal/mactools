@@ -13,7 +13,7 @@ Vent is written in Swift 6 and SwiftUI, has no dependencies outside the system f
 - **Storage.** Volumes with live read and write, and a whole-disk scan for the 500 largest files.
 - **Copy for AI.** The process table or the largest files as a markdown table with a header that explains this Mac, ready to paste into a chat.
 - **Windows.** Halves, corners, thirds, maximize and the other tiles, from a grid or from Rectangle's own shortcuts, with a second set for when Rectangle is running.
-- **Keep Awake.** A sleep assertion with a duration, a battery guard and an "Awake 42m" badge.
+- **Keep Awake.** A sleep assertion with a duration, a battery guard and an "Awake 42m" badge, plus an optional lid-close hold through the privileged helper, the same system setting `pmset disablesleep 1` writes.
 - **Keyboard Backlight.** The built-in keyboard's brightness on a slider, with the Auto switch the ambient sensor uses.
 - **Keyboard Lock.** Every key dead for as long as you need, with three ways out.
 
@@ -393,8 +393,15 @@ The same text is on stdout with `ventctl report processes` and `ventctl report f
 
 ## Keep Awake
 
-Holds this Mac awake with an `IOPMAssertionCreateWithProperties` assertion, `PreventUserIdleSystemSleep`, plus `PreventUserIdleDisplaySleep` beside it when "Keep the display on" is on.
+Holds this Mac awake in one of two strengths.
 
+1. **Idle sleep.** An `IOPMAssertionCreateWithProperties` assertion, `PreventUserIdleSystemSleep`, plus `PreventUserIdleDisplaySleep` beside it when "Keep the display on" is on. No privileges, released the moment Vent dies.
+2. **Lid-close sleep**, the option "Stay awake with the lid closed". The privileged helper sets the system-wide `SleepDisabled` flag with `IOPMSetSystemPowerSetting`, which is exactly what `sudo pmset disablesleep 1` writes. That is the only thing that keeps a Mac awake with the lid shut and through the Apple menu's Sleep; an assertion of any type does not.
+
+- **The UI says what is blocked, not what was clicked.** "Idle sleep blocked" or "Idle sleep and lid-close sleep blocked", read back from `IOPMCopyAssertionsByProcess` for Vent's own pid and from the flag itself. A switch that says on while the kernel holds nothing is the bug that wording exists to make impossible.
+- **The lid hold is off by default and needs the helper.** With no helper the rest of Keep Awake still works. With a helper older than this build, the switch says "Reinstall the helper to use this" and offers the Settings button; the helper version is the app's build number, so this feature needs helper v 0.1.0+3.
+- **Giving it back, the same guarantees as the fans.** The helper writes a root-owned marker when it sets the flag, and clears the flag when its last XPC client disconnects, on SIGTERM, SIGINT, SIGHUP and `atexit`, and at its own start if a marker from a previous run is still there. The app clears it when Keep Awake goes off, when the timer ends, when the battery guard trips, at a serious thermal state and on quit. A Mac that cannot sleep with its lid closed cooks in a bag, which is why the thermal rule fires a notch earlier here than the critical one that releases the assertion.
+- **It never clears a flag it did not set.** If `SleepDisabled` is already on when Vent asks, the helper refuses, says so, and the tab reports "This Mac cannot sleep at all - set with pmset, not by Vent" with the undo command as selectable text. A marker with no flag behind it is dropped, never acted on.
 - **Durations:** indefinitely, 30 minutes, 1 hour, 2 hours, 4 hours. The duration is handed to the kernel as the assertion's own timeout with `TimeoutActionRelease`, so it ends even if Vent dies first, and the switch on screen moves itself at the same second through one timer with a tolerance. Nothing polls.
 - **Battery guard.** Default on: the assertion is released below 20 % on battery, and the charge has to clear the threshold by three points before it comes back. The threshold is a stepper from 5 % to 50 %. A critical thermal state releases it whatever the setting says. Only what the guard released may the guard give back - a Keep Awake the user switched off stays off when the Mac is plugged in.
 - **The state is never restored.** Vent starts every launch with Keep Awake off, and there is no "turn on at launch" option. A Mac that silently never sleeps because of a setting made weeks ago is a flat battery waiting to happen.
@@ -571,8 +578,9 @@ ventctl helper-read F0Ac
 ventctl report processes        # the Copy for AI text, on stdout
 ventctl report files --tsv      # the largest files from the cache, tab separated
 ventctl report processes --no-preamble --limit 20
-ventctl awake status            # every sleep assertion, and SleepDisabled
+ventctl awake status            # every sleep assertion, SleepDisabled and who set it
 ventctl awake hold 30           # the same assertion the app takes, until Ctrl-C
+ventctl awake lid on|off        # the lid-close hold, through the privileged helper
 ventctl backlight get           # level, auto, suppressed, dimmed
 ventctl backlight ids           # every keyboard, and which are built in
 ventctl backlight auto
@@ -581,6 +589,7 @@ ventctl backlight auto
 `report files` reads the cache the app and `ventctl scan` write; it never starts a scan of its own.
 `backlight` is read only by design: a command that dims the keyboard of somebody looking at another window is not a debugging tool.
 `awake hold` names its assertion "ventctl Keep Awake" rather than "Vent Keep Awake", so `pmset -g assertions` tells the CLI and the app apart.
+`awake lid on` sets the same system-wide flag the app's switch sets, and the helper clears it again the moment this command exits and its connection drops: that is the restore guarantee, not a failure.
 
 ### Debug launch arguments
 
@@ -665,6 +674,10 @@ Nothing here can be proved by a test or a screenshot: a global shortcut needs a 
 - [ ] Move the Keyboard Backlight slider and watch the keyboard: the light follows within a moment, F5 and F6 keep working, and the slider follows them back.
 - [ ] Switch **Auto brightness** off and on in the tab, and `ventctl backlight get` agrees with the switch both times. Leave it the way you found it.
 - [ ] Turn Keep Awake on for 30 minutes: `pmset -g assertions | grep Vent` shows `PreventUserIdleSystemSleep` with a timeout, the header badge counts down, and `kill -9` of Vent takes the assertion with it.
+- [ ] Reinstall the helper (it has to be v 0.1.0+3), then switch **Stay awake with the lid closed** on with Keep Awake on. `pmset -g | grep SleepDisabled` says 1, `ventctl awake status` says the helper set it, and the tab and the popover both say "Idle sleep and lid-close sleep blocked".
+- [ ] With that on, close the lid for a minute on battery. The Mac stays awake: the fans keep spinning and a ping to it still answers. Open it again, switch Keep Awake off, and `pmset -g` says SleepDisabled 0.
+- [ ] `kill -9` Vent while the lid hold is on: `pmset -g` says SleepDisabled 0 within a second, because the helper clears it when its last client disconnects.
+- [ ] Run `sudo pmset disablesleep 1` by hand, then try the switch. Vent refuses, says the flag is not its own, and `pmset -g` still says 1 after switching Keep Awake off. Undo it with `sudo pmset disablesleep 0`.
 - [ ] Press Command-W in the window: it hides, the status item stays, and the first time the tip "Vent keeps running here" appears under it.
 - [ ] Settings > Appearance > **Show Dock icon**: the icon appears in the Dock, the window survives, the app menu has Quit, and switching it off puts the app back in the menu bar alone.
 - [ ] **Copy for AI** in the Processes toolbar, then paste into a chat: the preamble names this Mac, the table has 60 rows, and every column lines up. The same from the popover's Tools row, which samples first and says "Copied 60 processes".

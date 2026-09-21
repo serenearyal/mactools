@@ -23,6 +23,13 @@ enum KeepAwakeState: Equatable, Sendable {
 struct KeepAwakeOptions: Equatable, Sendable {
     var duration: KeepAwakeDuration = .indefinite
     var keepDisplayOn = false
+    /// "Stay awake with the lid closed": the system-wide `SleepDisabled` flag,
+    /// held by the privileged helper for as long as Keep Awake is on.
+    ///
+    /// Off by default, and this is the one place a default of off is right:
+    /// it needs root, it changes how the whole Mac behaves, and a Mac that
+    /// cannot sleep with its lid shut overheats in a bag.
+    var lidClose = false
     var batteryGuardEnabled = true
     /// Percent. The stepper offers 5 to 50.
     var batteryThreshold = 20
@@ -56,6 +63,10 @@ struct KeepAwakeMachine: Equatable, Sendable {
         case create(AssertionRequest)
         /// The moment the state must go back to off, or nil to cancel.
         case scheduleExpiry(Date?)
+        /// Ask the privileged helper to set or clear the system-wide sleep
+        /// setting. Only emitted when the answer changes, so a duration change
+        /// does not make an XPC call for nothing.
+        case lid(Bool)
     }
 
     private(set) var state: KeepAwakeState = .off
@@ -65,6 +76,9 @@ struct KeepAwakeMachine: Equatable, Sendable {
     /// Only what the guard released may the guard give back: a Keep Awake the
     /// user switched off must not come back when the Mac is plugged in.
     private(set) var releasedByGuard = false
+    /// What the machine last asked the helper for. Not what the system says:
+    /// the controller reads that back from the helper and shows it.
+    private(set) var lidRequested = false
     private(set) var options: KeepAwakeOptions
     private(set) var power = PowerStatus()
 
@@ -75,7 +89,14 @@ struct KeepAwakeMachine: Equatable, Sendable {
 
     // MARK: - Events
 
+    /// Every event ends with the lid question, so there is one rule for it and
+    /// not one per event: the switch, the timer, the guard, a hotter Mac and
+    /// the option itself all reach it the same way.
     mutating func handle(_ event: Event) -> [Effect] {
+        route(event) + lidEffects()
+    }
+
+    private mutating func route(_ event: Event) -> [Effect] {
         switch event {
         case .turnOn(let now):
             return turnOn(now: now)
@@ -133,6 +154,22 @@ struct KeepAwakeMachine: Equatable, Sendable {
             || previous.keepDisplayOn != updated.keepDisplayOn
         else { return applyGuard(now: now) }
         return start(now: now, replacing: true)
+    }
+
+    /// The lid hold, recomputed after every event and emitted only on a change.
+    ///
+    /// `LidSleepPolicy` decides; this only remembers what was last asked for,
+    /// so a Keep Awake that ends for any reason takes the system-wide flag
+    /// with it and a hot Mac gives it back without a rule of its own.
+    private mutating func lidEffects() -> [Effect] {
+        let wanted = LidSleepPolicy.wantsHold(
+            keepAwakeOn: state.isOn,
+            lidOptionOn: options.lidClose,
+            thermal: power.thermal
+        )
+        guard wanted != lidRequested else { return [] }
+        lidRequested = wanted
+        return [.lid(wanted)]
     }
 
     /// The guard, on every power change and after every option change.

@@ -102,6 +102,20 @@ final class HelperXPCTests: XCTestCase {
         XCTAssertEqual(reply.error?.contains("not running as root"), true, reply.error ?? "no message")
     }
 
+    /// The system sleep setting is root-only like the rest: a helper started
+    /// by hand must not look as if it worked.
+    func testTheSleepSettingIsRefusedWithoutRoot() throws {
+        try XCTSkipIf(geteuid() == 0, "the privilege gate only refuses a non-root helper")
+        let answered = expectation(description: "set sleep")
+        let inbox = Inbox<String?>()
+        try proxy().setSleepDisabled(true) {
+            inbox.put($0)
+            answered.fulfill()
+        }
+        wait(for: [answered], timeout: 5)
+        XCTAssertEqual((inbox.value ?? nil)?.contains("not running as root"), true)
+    }
+
     func testAnInvalidKeyIsRefusedPastTheGate() throws {
         try XCTSkipIf(geteuid() != 0, "an invalid key is only reached past the privilege gate")
         let answered = expectation(description: "read")
@@ -261,6 +275,145 @@ final class HelperFanXPCTests: XCTestCase {
         connection.remoteObjectInterface = NSXPCInterface(with: VentHelperProtocol.self)
         connection.resume()
         XCTAssertTrue(try snapshot().isAllAuto)
+    }
+}
+
+/// The system sleep setting over the same anonymous listener, against a flag
+/// that exists only in this process.
+///
+/// `InMemorySleepSwitch` is the whole point: the real setting is what
+/// `sudo pmset disablesleep 1` writes, and a test that wrote it would leave
+/// the machine running the suite unable to sleep. `HelperService.daemon()` is
+/// the only thing that builds the real one, and it lives in a file this target
+/// does not compile.
+final class HelperSleepXPCTests: XCTestCase {
+    private var listener: NSXPCListener!
+    private var delegate: HelperListenerDelegate!
+    private var connection: NSXPCConnection!
+    private var power: InMemorySleepSwitch!
+    private var marker: InMemorySleepDisabledMarker!
+
+    private func start(flag: Bool = false, marked: Bool = false) {
+        power = InMemorySleepSwitch(disabled: flag)
+        marker = InMemorySleepDisabledMarker(marked: marked)
+        let service = HelperService(
+            fanHardware: InMemoryFanHardware.macBookPro(),
+            sleep: SleepDisabledGovernor(power: power, marker: marker),
+            requiresRoot: false
+        )
+        delegate = HelperListenerDelegate(service: service)
+        listener = NSXPCListener.anonymous()
+        listener.delegate = delegate
+        listener.resume()
+
+        connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        connection.remoteObjectInterface = NSXPCInterface(with: VentHelperProtocol.self)
+        connection.resume()
+    }
+
+    override func tearDown() {
+        connection?.invalidate()
+        listener?.invalidate()
+        connection = nil
+        listener = nil
+        delegate = nil
+        power = nil
+        marker = nil
+        super.tearDown()
+    }
+
+    private func proxy() throws -> any VentHelperProtocol {
+        let raw = connection.remoteObjectProxyWithErrorHandler { error in
+            XCTFail("XPC connection error: \(error)")
+        }
+        return try XCTUnwrap(raw as? any VentHelperProtocol)
+    }
+
+    private func report() throws -> SleepDisabledReport {
+        let answered = expectation(description: "sleep state")
+        let inbox = Inbox<ReadReply>()
+        try proxy().sleepDisabledState { data, error in
+            inbox.put(ReadReply(data: data, error: error))
+            answered.fulfill()
+        }
+        wait(for: [answered], timeout: 5)
+        let reply = try XCTUnwrap(inbox.value)
+        XCTAssertNil(reply.error)
+        return try JSONDecoder().decode(SleepDisabledReport.self, from: try XCTUnwrap(reply.data))
+    }
+
+    @discardableResult
+    private func set(_ disabled: Bool) throws -> String? {
+        let answered = expectation(description: "set sleep")
+        let inbox = Inbox<String?>()
+        try proxy().setSleepDisabled(disabled) {
+            inbox.put($0)
+            answered.fulfill()
+        }
+        wait(for: [answered], timeout: 5)
+        return inbox.value ?? nil
+    }
+
+    func testTheFlagCrossesTheWireAndComesBackOff() throws {
+        start()
+        XCTAssertEqual(try report(), SleepDisabledReport.clear)
+
+        XCTAssertNil(try set(true))
+        XCTAssertTrue(power.value)
+        XCTAssertEqual(try report(), SleepDisabledReport(isSet: true, setByVent: true))
+        XCTAssertEqual(try report().owner, .vent)
+
+        XCTAssertNil(try set(false))
+        XCTAssertFalse(power.value)
+        XCTAssertFalse(marker.isMarked)
+    }
+
+    /// The user's own `pmset disablesleep 1`. Vent reports it and stops there.
+    func testAFlagSomebodyElseSetIsRefusedOverTheWire() throws {
+        start(flag: true)
+        XCTAssertEqual(try report().owner, .somebodyElse)
+        XCTAssertEqual(try set(true), SleepDisabledPolicy.foreignMessage)
+        XCTAssertEqual(try set(false), SleepDisabledPolicy.foreignMessage)
+        XCTAssertTrue(power.value, "the user's own setting is untouched")
+        XCTAssertEqual(power.writes, 0)
+    }
+
+    /// Restore guarantee 1 for the sleep setting, over a real connection: this
+    /// is what makes a `kill -9` of Vent safe, and it is the reason a Mac
+    /// cannot be left unable to sleep by a crash.
+    func testTheLastClientLeavingLetsThisMacSleepAgain() throws {
+        start()
+        XCTAssertNil(try set(true))
+        XCTAssertTrue(power.value)
+
+        connection.invalidate()
+
+        let cleared = expectation(description: "the flag came off")
+        let poll = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [power] timer in
+            guard let power, !power.value else { return }
+            timer.invalidate()
+            cleared.fulfill()
+        }
+        wait(for: [cleared], timeout: 5)
+        poll.invalidate()
+        XCTAssertFalse(marker.isMarked)
+    }
+
+    /// A helper that has no business writing the setting says so instead of
+    /// pretending it worked.
+    func testAServiceWithoutSleepControlSaysSo() throws {
+        power = InMemorySleepSwitch()
+        marker = InMemorySleepDisabledMarker()
+        let service = HelperService(fanHardware: InMemoryFanHardware.macBookPro(), requiresRoot: false)
+        delegate = HelperListenerDelegate(service: service)
+        listener = NSXPCListener.anonymous()
+        listener.delegate = delegate
+        listener.resume()
+        connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        connection.remoteObjectInterface = NSXPCInterface(with: VentHelperProtocol.self)
+        connection.resume()
+
+        XCTAssertEqual(try set(true)?.contains("does not control the sleep setting"), true)
     }
 }
 

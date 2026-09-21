@@ -118,8 +118,41 @@ struct AssertionEntry: Identifiable, Equatable, Sendable {
     }
 }
 
-/// The two read-only power questions the Keep Awake tab asks the system.
+/// What this process is holding right now, as the power manager sees it.
+///
+/// Read back, never remembered: the `IOPMAssertionID` returned by a create is
+/// only proof that a call succeeded, and a Vent that was killed, app-napped or
+/// restarted has ids that mean nothing. Every "on" in the UI comes from this.
+struct HeldAssertions: Equatable, Sendable {
+    var idleSystemSleep = false
+    var idleDisplaySleep = false
+
+    var holdsAnything: Bool { idleSystemSleep || idleDisplaySleep }
+}
+
+/// The read-only power questions the Keep Awake tab asks the system.
 enum PowerAssertions {
+    /// The assertions this process holds, from the same call the list uses.
+    ///
+    /// The kernel reports the type under either its modern name or the legacy
+    /// one, depending on how it was created and on the release, so both are
+    /// accepted. Cheap enough to run after every change and every five
+    /// seconds while the tab is open: one CF dictionary.
+    static func heldBy(pid: Int32 = getpid()) -> HeldAssertions {
+        var held = HeldAssertions()
+        for entry in all() where entry.pid == pid {
+            switch entry.type {
+            case kIOPMAssertionTypePreventUserIdleSystemSleep, "NoIdleSleepAssertion":
+                held.idleSystemSleep = true
+            case kIOPMAssertionTypePreventUserIdleDisplaySleep, "NoDisplaySleepAssertion":
+                held.idleDisplaySleep = true
+            default:
+                continue
+            }
+        }
+        return held
+    }
+
     /// Everything holding this Mac awake, from `IOPMCopyAssertionsByProcess`.
     ///
     /// No root needed, and cheap: one CF dictionary, a few hundred entries at

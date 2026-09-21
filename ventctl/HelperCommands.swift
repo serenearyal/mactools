@@ -46,6 +46,18 @@ enum HelperCommands {
         try blocking { try await connection.restoreAllAuto() }
     }
 
+    // MARK: - Sleep, for AwakeCommands
+
+    /// The system-wide `SleepDisabled` flag and whether Vent's helper is the
+    /// one holding it. Root-only, so it goes through the helper.
+    static func sleepDisabledState() throws -> SleepDisabledReport {
+        try blocking { try await connection.sleepDisabledState() }
+    }
+
+    static func setSleepDisabled(_ disabled: Bool) throws {
+        try blocking { try await connection.setSleepDisabled(disabled) }
+    }
+
     private static let connection = HelperConnection()
 
     /// `ventctl` is a synchronous tool: every command runs to the end and

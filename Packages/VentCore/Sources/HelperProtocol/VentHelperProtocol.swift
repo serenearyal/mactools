@@ -33,6 +33,22 @@ import Foundation
     /// work, so it reports a problem but never refuses to try.
     func restoreAllAuto(reply: @escaping @Sendable (String?) -> Void)
 
+    /// The system-wide `SleepDisabled` flag, as a `SleepDisabledReport` in
+    /// JSON, or nil with the reason.
+    ///
+    /// This is what `pmset -g` prints as `SleepDisabled`, plus the helper's own
+    /// answer to "did I set this?". The app needs both: a flag somebody else
+    /// set is reported and never touched.
+    func sleepDisabledState(reply: @escaping @Sendable (Data?, String?) -> Void)
+
+    /// Sets or clears `SleepDisabled`, which is what keeps this Mac awake with
+    /// the lid closed. The reply is the reason it did not happen, or nil.
+    ///
+    /// The helper remembers that it was the one who set it and clears it when
+    /// the last client disconnects, on its own termination and at its next
+    /// start. It never clears a flag it did not set.
+    func setSleepDisabled(_ disabled: Bool, reply: @escaping @Sendable (String?) -> Void)
+
     /// `[ProcessInfoRow]` as JSON for the processes the calling user does not
     /// own, or nil with the reason.
     ///

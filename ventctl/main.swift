@@ -22,7 +22,7 @@ commands:
   watch        stream CPU, memory, disk I/O, power and CPU temperature
   scan         run the largest-files scan
   report       print the Copy for AI text for the processes or the largest files
-  awake        read the sleep assertions, or hold one until Ctrl-C
+  awake        read the sleep assertions, hold one, or set the lid-close hold
   backlight    read the keyboard backlight (never writes it)
   window list  print the windows of the frontmost app, read-only
   helper-ping  check the privileged helper over XPC
@@ -53,9 +53,11 @@ options:
                --no-preamble    leave out the question for the chat model
                --tsv            tab separated instead of a markdown table
                --limit N        number of rows (60 processes, 100 files)
-  awake        status           list the assertions and SleepDisabled
+  awake        status           list the assertions, SleepDisabled and who set it
                hold <minutes>   hold the same assertion the app takes,
                                 0 for no timeout, Ctrl-C to release
+               lid on|off       set or clear SleepDisabled through the helper,
+                                the lid-close hold the app's switch makes
   backlight    get|ids|auto     read the built-in keyboard backlight
 
 'report files' reads the cache the app and 'ventctl scan' write; it never
@@ -215,8 +217,15 @@ do {
                 throw CLIError("'awake hold' takes a whole number of minutes, 0 for no timeout")
             }
             try AwakeCommands.hold(minutes: minutes)
+        case "lid":
+            guard tail.count == 2, let on = ["on": true, "off": false][tail[1]] else {
+                throw CLIError("'awake lid' takes 'on' or 'off'")
+            }
+            try AwakeCommands.lid(on: on)
         case .some(let name):
-            throw CLIError("'awake' takes 'status' or 'hold <minutes>', not '\(name)'")
+            throw CLIError(
+                "'awake' takes 'status', 'hold <minutes>' or 'lid on|off', not '\(name)'"
+            )
         }
     case "backlight":
         switch tail.first {

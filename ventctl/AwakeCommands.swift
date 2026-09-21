@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 
 import AwakeKit
+import HelperProtocol
 
 /// `ventctl awake`: the read side of Keep Awake, and a hold that takes the
 /// same assertion the app takes.
@@ -13,6 +14,7 @@ enum AwakeCommands {
     static func status() throws {
         let disabled = PowerAssertions.sleepDisabled()
         print("SleepDisabled  \(disabled.map { $0 ? "1 (this Mac never sleeps by itself)" : "0" } ?? "unknown")")
+        print("\(ownership())")
         if disabled == true {
             print("               undo with: \(PowerAssertions.enableSleepCommand)")
         }
@@ -82,6 +84,45 @@ enum AwakeCommands {
             }
         }
         dispatchMain()
+    }
+
+    // MARK: - The lid
+
+    /// Who set the flag, as far as the helper knows. The marker is root-owned,
+    /// so without a helper this line says only that it could not be asked.
+    private static func ownership() -> String {
+        do {
+            let report = try HelperCommands.sleepDisabledState()
+            return switch report.owner {
+            case .nobody: "set by        nobody"
+            case .vent: "set by        Vent's helper, which clears it when the last client goes"
+            case .somebodyElse: "set by        somebody else (pmset); Vent leaves it alone"
+            }
+        } catch {
+            // A helper older than this build does not export the method at
+            // all, so the connection drops mid-call and the reason reads like
+            // a crash. Say what it usually is.
+            let reason = (error as? CLIError)?.description ?? "\(error)"
+            return "set by        unknown: \(reason)\n"
+                + "               (a helper older than this build has no sleep method: reinstall it)"
+        }
+    }
+
+    /// `ventctl awake lid on|off`: the same helper call the app's switch makes.
+    ///
+    /// The flag comes off again as soon as this process disconnects, which is
+    /// the moment this command exits - the helper's restore guarantee. To see
+    /// it held, turn the switch on in the app.
+    static func lid(on: Bool) throws {
+        try HelperCommands.setSleepDisabled(on)
+        let report = try HelperCommands.sleepDisabledState()
+        print("SleepDisabled  \(report.isSet ? "1" : "0")")
+        print("owner          \(report.owner.rawValue)")
+        guard on else { return }
+        print(
+            "note: the helper clears it when this command exits and its connection drops. "
+                + "That is the safety guarantee, not a failure."
+        )
     }
 
     private static func thermalName(_ state: ProcessInfo.ThermalState) -> String {

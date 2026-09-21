@@ -7,6 +7,9 @@ import SwiftUI
 /// Mac that is holding it awake.
 struct KeepAwakeView: View {
     let keepAwake: KeepAwakeController
+    /// The way to the Install button, for a helper too old to know what the
+    /// lid option is. Defaulted, so the one call site stays a one-liner.
+    var openSettings: () -> Void = { AppServices.shared.selectedTab = .settings }
 
     var body: some View {
         Form {
@@ -39,6 +42,7 @@ struct KeepAwakeView: View {
             Section {
                 Toggle("Keep the display on", isOn: displayBinding)
                     .help("Also hold a display-sleep assertion, so the screen stays lit")
+                lidToggle
                 Toggle("Use the battery guard", isOn: guardBinding)
                     .help("Release the assertion when the charge falls to the threshold")
                 Stepper(
@@ -63,24 +67,26 @@ struct KeepAwakeView: View {
 
             Section {
                 VStack(alignment: .leading, spacing: Layout.gutter) {
-                    note("checkmark.circle", "Stops the idle sleep that follows a spell of no input.")
+                    // Truthful in both modes: what the second line promises
+                    // changes with the lid hold, so it is derived from what is
+                    // actually held rather than written twice.
+                    ForEach(summaryLines) { line in
+                        note(line.stops ? "checkmark.circle" : "xmark.circle", line.text)
+                    }
                     note(
-                        "xmark.circle",
-                        "Does not stop a sleep you ask for: the Apple menu, the power button "
-                            + "and a closed lid on battery all still sleep this Mac."
+                        "bolt.circle",
+                        keepAwake.blocking.lidSleepIsOurs
+                            ? "Both come off when Vent quits, when Vent is killed, when the timer ends "
+                                + "and when the battery guard or a hot Mac says so."
+                            : "Releases itself when Vent quits, and when Vent is killed."
                     )
-                    note(
-                        "xmark.circle",
-                        "Does not stop the display dimming unless \"Keep the display on\" is on."
-                    )
-                    note("bolt.circle", "Releases itself when Vent quits, and when Vent is killed.")
                 }
                 .fixedSize(horizontal: false, vertical: true)
             } header: {
                 Text("What it does")
             }
 
-            if keepAwake.sleepDisabled == true {
+            if keepAwake.lidSetBySomebodyElse {
                 Section {
                     sleepDisabledRow
                 } header: {
@@ -108,6 +114,53 @@ struct KeepAwakeView: View {
         .formStyle(.grouped)
         .onAppear { keepAwake.setListVisible(true) }
         .onDisappear { keepAwake.setListVisible(false) }
+    }
+
+    // MARK: - The lid
+
+    /// The one option that needs root. It is drawn as a switch plus a caption,
+    /// and under it whatever stands between the user and the thing working:
+    /// an old helper, no helper at all, or a flag `pmset` already holds.
+    @ViewBuilder
+    private var lidToggle: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Stay awake with the lid closed", isOn: lidBinding)
+                .help("Hold the system-wide sleep setting, the one \"pmset disablesleep 1\" writes")
+            Text(LidSleepPolicy.thermalCaption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            lidHint
+        }
+    }
+
+    @ViewBuilder
+    private var lidHint: some View {
+        if keepAwake.lidNeedsReinstall {
+            HStack(spacing: Layout.gutter) {
+                Label("Reinstall the helper to use this", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Button("Open Settings", action: openSettings)
+                    .controlSize(.small)
+            }
+        } else if let failure = keepAwake.lidFailure {
+            Label(failure, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if keepAwake.options.lidClose, keepAwake.blocking.lidSleepIsOurs {
+            Label("On: this Mac stays awake with the lid closed", systemImage: "checkmark.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var summaryLines: [AwakeBlocking.Line] {
+        AwakeBlocking.summary(
+            lidHeld: keepAwake.blocking.lidSleepBlocked,
+            displayHeld: keepAwake.blocking.displaySleepHeld
+        )
     }
 
     // MARK: - Pieces
@@ -179,8 +232,8 @@ struct KeepAwakeView: View {
         VStack(alignment: .leading, spacing: Layout.gutter) {
             Label(
                 "Somebody ran \"pmset disablesleep 1\" on this Mac. It never sleeps by itself, "
-                    + "with or without Keep Awake. Vent did not set this and cannot undo it: "
-                    + "it needs root.",
+                    + "with or without Keep Awake. Vent did not set this one, so Vent will not "
+                    + "undo it: a setting the user made by hand is theirs to reverse.",
                 systemImage: "exclamationmark.triangle"
             )
             .foregroundStyle(.secondary)
@@ -228,6 +281,10 @@ struct KeepAwakeView: View {
 
     private var displayBinding: Binding<Bool> {
         Binding(get: { keepAwake.options.keepDisplayOn }, set: { keepAwake.setKeepDisplayOn($0) })
+    }
+
+    private var lidBinding: Binding<Bool> {
+        Binding(get: { keepAwake.options.lidClose }, set: { keepAwake.setLidClose($0) })
     }
 
     private var guardBinding: Binding<Bool> {

@@ -37,14 +37,15 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecked 
         connection.exportedInterface = NSXPCInterface(with: VentHelperProtocol.self)
         connection.exportedObject = service
 
-        // Restore guarantee 1: the fans belong to the clients, and the last
-        // one to leave takes them back to Auto. XPC can call both handlers for
-        // one connection, and the registry ignores the second.
-        let fans = service.fans
-        let token = fans?.clientArrived()
+        // Restore guarantee 1: the fans and the system sleep setting belong to
+        // the clients, and the last one to leave takes the fans back to Auto
+        // and lets this Mac sleep again. XPC can call both handlers for one
+        // connection, and the registries ignore the second.
+        let service = self.service
+        let tokens = service.clientArrived()
         let gone: @Sendable () -> Void = { [log] in
             log.info("client pid \(pid, privacy: .public) gone")
-            if let token { fans?.clientLeft(token: token) }
+            service.clientLeft(tokens)
         }
         connection.invalidationHandler = gone
         connection.interruptionHandler = gone

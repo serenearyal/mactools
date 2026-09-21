@@ -95,6 +95,70 @@ func assertionName() {
     #expect(request.details == "ventctl keeps this Mac awake for 30 minutes.")
 }
 
+// MARK: - The lid hold
+
+@Test("the lid hold needs Keep Awake and the option, both")
+func lidNeedsBoth() {
+    #expect(LidSleepPolicy.wantsHold(keepAwakeOn: true, lidOptionOn: true))
+    #expect(!LidSleepPolicy.wantsHold(keepAwakeOn: true, lidOptionOn: false))
+    #expect(!LidSleepPolicy.wantsHold(keepAwakeOn: false, lidOptionOn: true))
+    #expect(!LidSleepPolicy.wantsHold(keepAwakeOn: false, lidOptionOn: false))
+}
+
+/// A closed Mac that cannot sleep is the dangerous one, so the flag comes off
+/// a notch earlier than the assertion does.
+@Test(
+    "a hot Mac gets its lid sleep back at serious, not at critical",
+    arguments: [
+        (ProcessInfo.ThermalState.nominal, true),
+        (.fair, true),
+        (.serious, false),
+        (.critical, false),
+    ]
+)
+func lidThermalCeiling(state: ProcessInfo.ThermalState, held: Bool) {
+    #expect(LidSleepPolicy.wantsHold(keepAwakeOn: true, lidOptionOn: true, thermal: state) == held)
+}
+
+@Test("the thermal ceiling is the one the caption promises")
+func lidThermalCaption() {
+    #expect(LidSleepPolicy.thermalCeiling == .serious)
+    #expect(LidSleepPolicy.thermalCaption.contains("serious"))
+}
+
+// MARK: - What is blocked, in words
+
+@Test(
+    "the status line says what is blocked, never what was clicked",
+    arguments: [
+        (false, false, false, "This Mac sleeps as usual"),
+        (true, false, false, "Idle sleep blocked"),
+        (true, true, true, "Idle sleep and lid-close sleep blocked"),
+        (false, true, true, "Lid-close sleep blocked"),
+        (false, true, false, "This Mac cannot sleep at all - set with pmset, not by Vent"),
+    ]
+)
+func blockingTitle(idle: Bool, lid: Bool, ours: Bool, title: String) {
+    let blocking = AwakeBlocking(idleSleepHeld: idle, lidSleepBlocked: lid, lidSleepIsOurs: ours)
+    #expect(blocking.title == title)
+    #expect(blocking.isBlockingAnything == (idle || lid))
+}
+
+@Test("the \"what it does\" list tells the truth in both modes")
+func blockingSummary() {
+    let withoutLid = AwakeBlocking.summary(lidHeld: false, displayHeld: false)
+    #expect(withoutLid.count == 3)
+    #expect(withoutLid[0].stops)
+    #expect(!withoutLid[1].stops)
+    #expect(withoutLid[1].text.contains("closed lid all still sleep this Mac"))
+    #expect(!withoutLid[2].stops)
+
+    let withLid = AwakeBlocking.summary(lidHeld: true, displayHeld: true)
+    #expect(withLid.filter(\.stops).count == withLid.count)
+    #expect(withLid[1].text.contains("Stops a closed lid"))
+    #expect(withLid[2].text.contains("display"))
+}
+
 // MARK: - The battery guard
 
 @Test("on power nothing is released")
