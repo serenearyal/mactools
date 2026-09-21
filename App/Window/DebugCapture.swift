@@ -14,9 +14,26 @@ import SwiftUI
 enum DebugCapture {
     static func run(arguments: [String], services: AppServices) {
         if let appearance = value(of: "--appearance", in: arguments) {
-            NSApp.appearance = NSAppearance(
-                named: appearance == "dark" ? .darkAqua : .aqua
-            )
+            let dark = appearance == "dark"
+            NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            // The menu bar belongs to the system: `NSApp.appearance` does not
+            // reach the status item. This does, and it goes through the same
+            // KVO a wallpaper flip uses.
+            services.statusItemController?.overrideButtonAppearance(dark: dark)
+        }
+        // The two debug values the menu bar label needs and the machine will
+        // not give. They are read before the capture gate on purpose: a
+        // measurement run has no `--capture` and still needs the fan to turn.
+        //
+        // Neither of them writes anything anywhere. `--fake-fan-rpm` is only
+        // obeyed together with `--fake-fans`, which is the debug backend that
+        // touches no real fan at all.
+        if let celsius = value(of: "--fake-cpu-temp", in: arguments).flatMap(Double.init) {
+            services.statusItemController?.overrideCPUTemperature(celsius)
+        }
+        if DebugFanBackend.isRequested,
+           let rpm = value(of: "--fake-fan-rpm", in: arguments).flatMap(Double.init) {
+            services.statusItemController?.overrideFanRPM(rpm)
         }
         guard let directory = value(of: "--capture", in: arguments) else { return }
         let delay = value(of: "--capture-delay", in: arguments).flatMap(Double.init) ?? 8
@@ -44,6 +61,10 @@ enum DebugCapture {
                 dark: suffix == "dark",
                 size: detailSize(services: services),
                 to: base.appending(path: "detail-\(tab)-\(suffix).png")
+            )
+            captureScrolledContent(
+                window: services.windowController.attachedWindow,
+                to: base.appending(path: "form-\(tab)-\(suffix).png")
             )
             // The Windows section draws the window that was in front, and the
             // render is not the popover opening, so nothing captures it for us.
@@ -101,11 +122,258 @@ enum DebugCapture {
                     to: base.appending(path: "menubar-asleep-\(Int(scale))x-\(suffix).png")
                 )
             }
+            captureHeat(services: services, dark: suffix == "dark", base: base, suffix: suffix)
             if let live = services.statusItemController?.debugButtonSnapshot() {
                 write(live, to: base.appending(path: "menubar-live-\(suffix).png"))
             }
-            if quit { NSApp.terminate(nil) }
+            let first = services.statusItemController?.fanAngle
+            // The glyph turns in the window server, so two snapshots of the
+            // same button a fifth of a second apart are two different angles.
+            // With the fan at rest they are the same picture, which is the
+            // other half of the proof.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                if let live = services.statusItemController?.debugButtonSnapshot() {
+                    write(live, to: base.appending(path: "menubar-live-spin-\(suffix).png"))
+                }
+                writeSpinStatus(
+                    services: services,
+                    firstAngle: first,
+                    to: base.appending(path: "menubar-spin-\(suffix).txt")
+                )
+                if quit { NSApp.terminate(nil) }
+            }
         }
+    }
+
+    /// The label at the four heat levels, drawn by the shipping path.
+    ///
+    /// Not `MenuBarLabelView`: the tinted label is `MenuBarLabelImage` and
+    /// nothing else, so the capture has to be of that, with the base colour the
+    /// menu bar of that appearance would give a template.
+    private static func captureHeat(services: AppServices, dark: Bool, base: URL, suffix: String) {
+        let style = services.settings.labelStyle
+        for celsius in [55.0, 72.0, 84.0, 95.0] {
+            let cells = [
+                MenuBarCell(metric: .cpuUsage, caption: "CPU", value: "38%", widest: "100%"),
+                MenuBarCell(
+                    metric: .cpuTemperature,
+                    caption: "TEMP",
+                    value: Fmt.compactTemperature(celsius, unit: services.settings.temperatureUnit),
+                    widest: "188°"
+                ),
+            ]
+            let level = HeatTint.level(celsius: celsius)
+            captureDirectLabel(
+                cells: cells,
+                style: style,
+                tints: level.isTinted ? [.normal, level] : [],
+                dark: dark,
+                to: base.appending(path: "menubar-heat-\(Int(celsius))-\(suffix).png")
+            )
+        }
+        // The same label with the glyph in the bitmap and with the glyph left
+        // to its layer: every cell has to land on exactly the same x.
+        let cells = MenuBarLabel.cells(snapshot: services.store.snapshot, settings: services.settings)
+        for (name, drawsIcon) in [("icon", true), ("layer", false)] {
+            captureDirectLabel(
+                cells: cells,
+                style: style,
+                tints: [],
+                dark: dark,
+                drawsIcon: drawsIcon,
+                to: base.appending(path: "menubar-direct-\(name)-\(suffix).png")
+            )
+        }
+    }
+
+    /// One label through `MenuBarLabelImage`, on the plate the menu bar would
+    /// put it on. A template image is tinted here the way the system tints it;
+    /// a tinted one already carries its colours and is composited as it is.
+    private static func captureDirectLabel(
+        cells: [MenuBarCell],
+        style: MenuBarLabelStyle,
+        tints: [HeatLevel],
+        dark: Bool,
+        drawsIcon: Bool = true,
+        scale: CGFloat = 4,
+        to url: URL
+    ) {
+        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        guard let image = MenuBarLabelImage.image(
+            cells: cells,
+            style: style,
+            showIcon: true,
+            awake: false,
+            scale: scale,
+            tints: tints,
+            baseColor: dark ? .white : .black,
+            appearance: appearance,
+            drawsIcon: drawsIcon
+        ) else { return }
+
+        let drawn: NSImage
+        if image.isTemplate {
+            drawn = NSImage(size: image.size)
+            drawn.lockFocus()
+            image.draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
+            (dark ? NSColor.white : NSColor.black).set()
+            NSRect(origin: .zero, size: image.size).fill(using: .sourceAtop)
+            drawn.unlockFocus()
+        } else {
+            drawn = image
+        }
+
+        let padding = CGSize(width: 16, height: 6)
+        let size = CGSize(width: image.size.width + padding.width * 2, height: 24 + padding.height * 2)
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width * scale),
+            pixelsHigh: Int(size.height * scale),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return }
+        rep.size = size
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        (dark ? NSColor(white: 0.13, alpha: 1) : NSColor(white: 0.96, alpha: 1)).setFill()
+        NSRect(origin: .zero, size: size).fill()
+        drawn.draw(
+            at: NSPoint(x: padding.width, y: (size.height - image.size.height) / 2),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        write(rep, to: url)
+    }
+
+    /// What the fan glyph is doing, and the proof that moving it out of the
+    /// bitmap left every cell where it was.
+    private static func writeSpinStatus(services: AppServices, firstAngle: CGFloat?, to url: URL) {
+        let controller = services.statusItemController
+        let settings = services.settings
+        let cells = MenuBarLabel.cells(snapshot: services.store.snapshot, settings: settings)
+        let lines = [
+            "spin setting: \(settings.spinsFanIcon)",
+            "tint setting: \(settings.tintsHotTemperatures)",
+            "reduce motion: \(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)",
+            "spin conditions: \(controller.map { "\($0.spinConditions)" } ?? "none")",
+            "spinning: \(controller?.isFanSpinning ?? false)",
+            "seconds per revolution: \(controller?.fanSpinSeconds.map { String(format: "%.3f", $0) } ?? "still")",
+            "angle at the first snapshot: \(String(format: "%.4f", firstAngle ?? 0)) rad",
+            "angle 0.2 s later: \(String(format: "%.4f", controller?.fanAngle ?? 0)) rad",
+            // The presentation layer wraps its angle into one turn, so the
+            // difference is wrapped too before it is printed.
+            "turned in between: \(String(format: "%.1f", wrapped((controller?.fanAngle ?? 0) - (firstAngle ?? 0)) * 180 / .pi)) degrees",
+            "button flipped: \(controller?.isButtonFlipped ?? false)",
+            "button appearance: \(controller?.buttonAppearanceName ?? "none")",
+            "fans in the label snapshot: \(controller?.labelFanSummary ?? "none")",
+            "glyph box: \(MenuBarLabelImage.iconFrame(cells: cells, style: settings.labelStyle, showIcon: settings.showMenuBarIcon, awake: false).map { "\($0)" } ?? "none")",
+            "cells identical without the glyph: \(cellsIdenticalWithoutGlyph(services: services))",
+            "hub, layer against bitmap: \(hubPlacement(services: services))",
+        ]
+        try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// Where the layer turns about, against where the bitmap draws the hub.
+    ///
+    /// The bitmap's hub is the centre of mass of the ink inside the glyph box,
+    /// which for a fan with four identical blades is the hub to the pixel. The
+    /// layer's is its rotation centre, brought back into the same coordinates.
+    /// The two have to be the same point, or the glyph moved when it left the
+    /// image.
+    private static func hubPlacement(services: AppServices) -> String {
+        let settings = services.settings
+        let style = settings.labelStyle
+        let cells = MenuBarLabel.cells(snapshot: services.store.snapshot, settings: settings)
+        let scale: CGFloat = 8
+        guard let layerHub = services.statusItemController?.glyphHubInLabel else {
+            return "the glyph is not in a layer"
+        }
+        guard let box = MenuBarLabelImage.iconFrame(
+            cells: cells, style: style, showIcon: settings.showMenuBarIcon, awake: false
+        ), let image = MenuBarLabelImage.image(
+            cells: cells, style: style, showIcon: settings.showMenuBarIcon, awake: false, scale: scale
+        ), let rep = bitmap(of: image) else { return "not comparable" }
+
+        var total = 0.0
+        var x = 0.0
+        var y = 0.0
+        for row in 0..<rep.pixelsHigh {
+            for column in 0..<rep.pixelsWide {
+                let point = CGPoint(
+                    x: (Double(column) + 0.5) / scale,
+                    y: (Double(rep.pixelsHigh - 1 - row) + 0.5) / scale
+                )
+                guard box.contains(point),
+                      let alpha = rep.colorAt(x: column, y: row)?.alphaComponent, alpha > 0
+                else { continue }
+                total += alpha
+                x += alpha * point.x
+                y += alpha * point.y
+            }
+        }
+        guard total > 0 else { return "no ink in the glyph box" }
+        let bitmapHub = CGPoint(x: x / total, y: y / total)
+        let delta = hypot(layerHub.x - bitmapHub.x, layerHub.y - bitmapHub.y)
+        return String(
+            format: "layer (%.3f, %.3f) bitmap (%.3f, %.3f), apart by %.3f pt",
+            layerHub.x, layerHub.y, bitmapHub.x, bitmapHub.y, delta
+        )
+    }
+
+    /// An angle difference in (-pi, pi].
+    private static func wrapped(_ radians: CGFloat) -> CGFloat {
+        var value = radians.truncatingRemainder(dividingBy: 2 * .pi)
+        if value > .pi { value -= 2 * .pi }
+        if value <= -.pi { value += 2 * .pi }
+        return value
+    }
+
+    /// Draws the label both ways and compares them pixel by pixel: every
+    /// difference has to be inside the glyph's own box.
+    private static func cellsIdenticalWithoutGlyph(services: AppServices) -> String {
+        let settings = services.settings
+        let style = settings.labelStyle
+        let cells = MenuBarLabel.cells(snapshot: services.store.snapshot, settings: settings)
+        let scale: CGFloat = 2
+        guard let withIcon = MenuBarLabelImage.image(
+            cells: cells, style: style, showIcon: true, awake: false, scale: scale
+        ), let withoutIcon = MenuBarLabelImage.image(
+            cells: cells, style: style, showIcon: true, awake: false, scale: scale, drawsIcon: false
+        ), let left = bitmap(of: withIcon), let right = bitmap(of: withoutIcon),
+           let box = MenuBarLabelImage.iconFrame(
+               cells: cells, style: style, showIcon: true, awake: false
+           )
+        else { return "not comparable" }
+        guard left.pixelsWide == right.pixelsWide, left.pixelsHigh == right.pixelsHigh else {
+            return "the label changed size: \(withIcon.size) against \(withoutIcon.size)"
+        }
+        var outside = 0
+        var inside = 0
+        for y in 0..<left.pixelsHigh {
+            for x in 0..<left.pixelsWide {
+                guard let a = left.colorAt(x: x, y: y), let b = right.colorAt(x: x, y: y),
+                      abs(a.alphaComponent - b.alphaComponent) > 1.0 / 255
+                else { continue }
+                // The rep is measured from the top; the box is measured from
+                // the bottom, like everything in the label.
+                let point = CGPoint(
+                    x: Double(x) / scale,
+                    y: Double(left.pixelsHigh - 1 - y) / scale
+                )
+                if box.insetBy(dx: -1, dy: -1).contains(point) { inside += 1 } else { outside += 1 }
+            }
+        }
+        return outside == 0
+            ? "yes (\(inside) pixels differ, all inside the glyph box)"
+            : "NO: \(outside) pixels differ outside the glyph box"
     }
 
     /// `--label-bench <directory>`: how long one status item label costs.
@@ -267,6 +535,32 @@ enum DebugCapture {
         }
         NSGraphicsContext.restoreGraphicsState()
         write(rep, to: url)
+    }
+
+    /// Everything in the tab's scroll view, past the bottom of the window.
+    ///
+    /// A `Form` is an AppKit scroll view, so `ImageRenderer` draws nothing for
+    /// it and a screenshot of the window shows only what fits on the screen. A
+    /// settings section below the fold could not be checked at all. This asks
+    /// the document view to draw itself at its full height, which is the one
+    /// way to see a long form in one picture.
+    private static func captureScrolledContent(window: NSWindow?, to url: URL) {
+        guard let root = window?.contentView, let scroll = firstScrollView(in: root) else { return }
+        let view = scroll.documentView ?? scroll
+        let bounds = view.bounds
+        guard bounds.width > 1, bounds.height > 1,
+              let rep = view.bitmapImageRepForCachingDisplay(in: bounds)
+        else { return }
+        view.cacheDisplay(in: bounds, to: rep)
+        write(rep, to: url)
+    }
+
+    private static func firstScrollView(in view: NSView) -> NSScrollView? {
+        if let scroll = view as? NSScrollView { return scroll }
+        for child in view.subviews {
+            if let found = firstScrollView(in: child) { return found }
+        }
+        return nil
     }
 
     /// The size the detail pane really has right now: the content of the

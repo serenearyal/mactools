@@ -187,6 +187,11 @@ targets:
       # itself stays out: an `@Observable` class in this bundle makes the
       # linker pull SwiftUICore, which a unit-test bundle may not link.
       - App/Model/SamplingPlan.swift
+      # When a temperature in the label turns amber, orange and red, and how
+      # fast the fan glyph turns. Pure arithmetic in files of their own, next
+      # to the AppKit drawing that uses them, for the same linker reason.
+      - App/MenuBar/HeatTint.swift
+      - App/MenuBar/FanSpin.swift
       # The rows the Processes tab draws, derived once per sample instead of
       # inside `body`, and the bounded cache behind the menu bar label. Both
       # are plain values, for the same linker reason as everything here.

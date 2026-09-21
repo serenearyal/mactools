@@ -86,6 +86,12 @@ struct SettingsData: Codable, Equatable, Sendable {
     var menuBarMetrics: [MenuBarMetric] = [.cpuUsage, .cpuTemperature]
     var labelStyle: MenuBarLabelStyle = .twoLine
     var showMenuBarIcon: Bool = true
+    /// "Tint hot temperatures": amber at 70 C, orange at 80, red at 90. On by
+    /// default - a temperature in the menu bar is there to be noticed.
+    var tintsHotTemperatures: Bool = true
+    /// "Spin the fan icon": the glyph turns with the fastest fan. On by
+    /// default, and it costs nothing at all while the fans are at 0 rpm.
+    var spinsFanIcon: Bool = true
     /// Metrics by default; icon only is the way out of a full menu bar.
     var menuBarContent: MenuBarContent = .metrics
     var refreshInterval: RefreshInterval = .twoSeconds
@@ -141,6 +147,10 @@ struct SettingsData: Codable, Equatable, Sendable {
             ?? fallback.labelStyle
         showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon)
             ?? fallback.showMenuBarIcon
+        tintsHotTemperatures = try container.decodeIfPresent(Bool.self, forKey: .tintsHotTemperatures)
+            ?? fallback.tintsHotTemperatures
+        spinsFanIcon = try container.decodeIfPresent(Bool.self, forKey: .spinsFanIcon)
+            ?? fallback.spinsFanIcon
         menuBarContent = try container.decodeIfPresent(MenuBarContent.self, forKey: .menuBarContent)
             ?? fallback.menuBarContent
         refreshInterval = try container.decodeIfPresent(RefreshInterval.self, forKey: .refreshInterval)
@@ -219,6 +229,16 @@ final class AppSettings {
     var menuBarContent: MenuBarContent {
         get { data.menuBarContent }
         set { data.menuBarContent = newValue; persist() }
+    }
+
+    var tintsHotTemperatures: Bool {
+        get { data.tintsHotTemperatures }
+        set { data.tintsHotTemperatures = newValue; persist() }
+    }
+
+    var spinsFanIcon: Bool {
+        get { data.spinsFanIcon }
+        set { data.spinsFanIcon = newValue; persist() }
     }
 
     var setupChecklistDismissed: Bool {

@@ -32,6 +32,54 @@ enum MenuBarLabel {
         }
     }
 
+    /// The heat of every cell, in the order of `cells`.
+    ///
+    /// Empty while the setting is off or no cell shows a temperature, which is
+    /// what keeps the label a template image for everybody who is not hot.
+    /// `previous` is the level each metric was drawn at last time, which is
+    /// where the hysteresis lives.
+    static func heatLevels(
+        cells: [MenuBarCell],
+        snapshot: MetricsSnapshot,
+        settings: AppSettings,
+        previous: [MenuBarMetric: HeatLevel]
+    ) -> [HeatLevel] {
+        guard settings.tintsHotTemperatures else { return [] }
+        var levels: [HeatLevel] = []
+        var any = false
+        for cell in cells {
+            guard let celsius = celsius(of: cell, snapshot: snapshot, settings: settings) else {
+                levels.append(.normal)
+                continue
+            }
+            let level = HeatTint.level(celsius: celsius, previous: previous[cell.metric] ?? .normal)
+            any = any || level.isTinted
+            levels.append(level)
+        }
+        return any ? levels : []
+    }
+
+    /// The Celsius behind a cell that shows a temperature, whatever unit it
+    /// draws. Nil for every other metric.
+    ///
+    /// The thresholds are in Celsius by definition: a die is hot at 90 C in
+    /// every country.
+    static func celsius(
+        of cell: MenuBarCell,
+        snapshot: MetricsSnapshot,
+        settings: AppSettings
+    ) -> Double? {
+        switch cell.metric {
+        case .cpuTemperature:
+            return snapshot.hottestCPU?.celsius
+        case .sensorTemperature:
+            guard let key = SMCFourCC(code: settings.sensorKey) else { return nil }
+            return snapshot.temperature(forKey: key)?.celsius
+        default:
+            return nil
+        }
+    }
+
     private static func caption(for metric: MenuBarMetric, settings: AppSettings) -> String {
         guard metric == .sensorTemperature, let key = SMCFourCC(code: settings.sensorKey) else {
             return metric.caption

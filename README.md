@@ -118,6 +118,48 @@ The popover opens on the last numbers it had, so there is no empty frame and no 
 The label is a SwiftUI view rendered into a template image, so the system paints it for light and dark mode.
 Each metric gets a fixed cell width, computed from the widest string it can ever show, so the item never jitters while the numbers change.
 
+### Heat, in colour
+
+A temperature in the menu bar is there to be noticed, so it changes colour with the die: **amber at 70 °C, orange at 80 °C, red at 90 °C**.
+The thresholds are in Celsius whatever unit the label draws, so a user in Fahrenheit gets the colour at the same die temperature as everybody else.
+Only the value is tinted, never the caption and never anything else in the label: a four-letter caption at 7 pt in amber is unreadable, and the number beside it is what the colour is about.
+
+The colour goes back down two degrees under the threshold that raised it (`HeatTint.hysteresis`).
+Without that a die sitting at 70.0 would flicker between black and amber once a second, which is the one thing a menu bar must never do.
+Coming down from red it falls through each guard band in turn, so 79 °C on the way down from 95 is still orange while 79 °C on the way up is amber.
+
+A template image is a mask: it carries alpha and nothing else, so it cannot carry a colour.
+While nothing is hot the label is exactly the template image it has always been, and the system tints it - the ordinary case costs nothing and looks like nothing changed.
+The moment one cell is hot the label becomes a plain image, and everything that is not tinted is drawn in the colour the menu bar would have given the template: white on a dark bar, black on a light one, resolved from the status item button's own `effectiveAppearance`.
+The menu bar is dark or light on its own account - a dark wallpaper turns it dark in Light Mode too - so the button's appearance is observed, and a flip redraws the label rather than leaving black text on a dark bar.
+One consequence of leaving the template behind: while the popover is open the system no longer inverts the label with the highlight, so a tinted label keeps its colours over the highlighted item.
+
+**Settings > Menu bar > Tint hot temperatures** switches it off; it is on by default.
+
+### The fan that turns with the fans
+
+The fan symbol turns while the fastest fan is above 0 rpm, and faster the faster it goes: the fan's own minimum to maximum maps linearly onto **one revolution in 4.0 s down to one in 1.5 s**.
+The symbol turns in 8 steps a second, not smoothly: a smooth rotation made the window server composite the menu bar strip at 120 Hz and cost 2.5 to 4.7 points of WindowServer CPU on the M1 Pro, the stepped one costs about 1 point, and only while the fans really turn.
+At 0 rpm it stands still, which is where an M1 Pro spends most of its life.
+
+It is not the bitmap that turns.
+The glyph is a `CALayer` on the status button, like the status light under it, and the rotation is one discrete `CAKeyframeAnimation` on `transform.rotation.z` that repeats for ever: Core Animation makes every step in the window server and the app itself does nothing at all while the fan turns.
+The bitmap keeps the glyph's box and leaves it empty, so no cell moves by a pixel - the capture path draws the label both ways and checks that every differing pixel is inside that box.
+A speed change reads the presentation layer's current angle and starts the new animation from there, so it is a change of speed and not a jump, and the animation is only replaced when the speed moves by more than 10 %.
+The layer turns about the hub, which is measured from the pixels rather than assumed: the symbol's box is not centred on its hub, and a rotation about the box centre makes the hub orbit.
+Two captures a fifth of a second apart show the blades 38° apart and the hub in the same place, to 0.08 pt.
+
+It stops, and stands upright, when any of these is true: the fans are at 0 rpm or unknown, **Reduce Motion** is on, the status item is not on a screen (the notch case), the Mac sleeps, **Low Power Mode** is on, or the setting is off.
+The label asks for a fan reading only while the glyph can turn; with the spin off and no fan metric chosen, nothing about a fan is read at all, and a status item the menu bar has parked behind the notch reads nothing either way.
+
+**Settings > Menu bar > Spin the fan icon** switches it off; it is on by default.
+
+**What it costs.** Vent's own CPU does not move: the closed state at 0 rpm measures 0.35 % against 0.36 % for the build before this work, in the same minutes on the same Mac, and a spinning glyph costs Vent 0.23 % to 0.32 %, which is the noise of the measurement.
+The window server is the one that pays.
+On this Liquid Retina XDR Mac, three pairs of runs measured WindowServer at 49.4, 50.0 and 49.2 % with the glyph turning against 44.7, 45.4 and 46.7 % with the same build standing still: **between 2.5 and 4.7 points** for one 13 pt layer, because the menu bar is composited over the wallpaper and every frame of the rotation makes the system draw that strip again.
+That is a real cost, and it is why the setting exists.
+A stepped rotation at 8 frames per second instead of a continuous one would cut most of it.
+
 **Settings > Appearance > Show in menu bar** has two positions.
 
 - **Metrics**, the default: the chosen metrics, in one or two lines, with or without the fan symbol.
@@ -628,6 +670,8 @@ open -a Vent --args --show-window --tab sensors
   --window-selftest-out <dir>  where the PASS/FAIL table is written
   --fake-fans                  a real governor over fans that do not exist
   --fan-mode 0=constant:3000   what a fake fan should do; also curve:Tp01:45:85 and auto
+  --fake-fan-rpm <rpm>         what the menu bar label reads as the fastest fan; needs --fake-fans
+  --fake-cpu-temp <celsius>    what the label reads as the hottest CPU sensor, for the heat tint
   --window-size 760x480        exact content size, for a shot at the minimum the layout allows
   --no-activate                never take the front: the window is ordered in behind everything
   --window-front               order the window on top without activating (measurement only)

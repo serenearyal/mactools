@@ -173,13 +173,20 @@ enum SamplingPlan {
         demand: SamplingDemand,
         menuBarMetrics: [MenuBarMetric],
         chosenSensorScope: TemperatureScope,
-        showsUnlabelledSensors: Bool
+        showsUnlabelledSensors: Bool,
+        spinsFanIcon: Bool = false
     ) -> SampleRequest {
         // A label that draws no number asks for nothing at all, not even the
         // one CPU call: that is what lets an icon-only app, and an app whose
-        // status item the menu bar has no room for, sample nothing.
+        // status item the menu bar has no room for, sample nothing. The
+        // spinning glyph is part of that label, so it stops with it rather
+        // than keeping the fans awake for a symbol nobody can see.
         var request = demand.menuBarShowsMetrics
-            ? menuBarRequest(metrics: menuBarMetrics, chosenSensorScope: chosenSensorScope)
+            ? menuBarRequest(
+                metrics: menuBarMetrics,
+                chosenSensorScope: chosenSensorScope,
+                spinsFanIcon: spinsFanIcon
+            )
             : .nothing
         if demand.wantsPopover {
             request.formUnion(popoverRequest(section: demand.popoverSection))
@@ -197,11 +204,18 @@ enum SamplingPlan {
 
     /// Only what the menu bar label shows. CPU stays on either way: one mach
     /// call, and it keeps the history graph continuous.
+    ///
+    /// `spinsFanIcon` is the fan glyph turning with the real fans: it is a
+    /// thing the label draws, so it asks for the fans the same way the "Fastest
+    /// fan" metric does. With the setting off, and with no fan metric chosen,
+    /// nothing about the fans is read at all.
     static func menuBarRequest(
         metrics: [MenuBarMetric],
-        chosenSensorScope: TemperatureScope
+        chosenSensorScope: TemperatureScope,
+        spinsFanIcon: Bool = false
     ) -> SampleRequest {
         var request = SampleRequest()
+        if spinsFanIcon { request.fans = true }
         for metric in metrics {
             switch metric {
             case .cpuUsage:
@@ -335,13 +349,15 @@ enum SamplingPlan {
         demand: SamplingDemand,
         menuBarMetrics: [MenuBarMetric],
         chosenSensorScope: TemperatureScope = .labelled,
-        showsUnlabelledSensors: Bool = false
+        showsUnlabelledSensors: Bool = false,
+        spinsFanIcon: Bool = false
     ) -> Bool {
         !metricsRequest(
             demand: demand,
             menuBarMetrics: menuBarMetrics,
             chosenSensorScope: chosenSensorScope,
-            showsUnlabelledSensors: showsUnlabelledSensors
+            showsUnlabelledSensors: showsUnlabelledSensors,
+            spinsFanIcon: spinsFanIcon
         ).readsNothing
     }
 

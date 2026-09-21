@@ -189,6 +189,11 @@ final class MetricsStore {
             _ = settings.menuBarMetrics
             _ = settings.showUnlabelledSensors
             _ = settings.sensorKey
+            // The spinning fan glyph is the one part of the label that asks
+            // for a metric of its own, so switching it changes what a pass
+            // reads and the loop has to be rebuilt.
+            _ = settings.spinsFanIcon
+            _ = settings.showMenuBarIcon
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -215,8 +220,15 @@ final class MetricsStore {
             demand: demand,
             menuBarMetrics: settings.menuBarMetrics,
             chosenSensorScope: scopeForChosenSensor(),
-            showsUnlabelledSensors: settings.showUnlabelledSensors
+            showsUnlabelledSensors: settings.showUnlabelledSensors,
+            spinsFanIcon: spinsFanIcon
         )
+    }
+
+    /// True when the label draws a fan glyph that is allowed to turn, which is
+    /// the only reason the closed app ever reads a fan.
+    private var spinsFanIcon: Bool {
+        settings.spinsFanIcon && (settings.showMenuBarIcon || settings.menuBarMetrics.isEmpty)
     }
 
     /// The loop is not isolated to the main actor: the pass runs on
@@ -257,7 +269,8 @@ final class MetricsStore {
             demand: demand,
             menuBarMetrics: settings.menuBarMetrics,
             chosenSensorScope: scopeForChosenSensor(),
-            showsUnlabelledSensors: settings.showUnlabelledSensors
+            showsUnlabelledSensors: settings.showUnlabelledSensors,
+            spinsFanIcon: spinsFanIcon
         )
         if request.diskSpace, Date.now.timeIntervalSince(lastVolumeSample) < MetricsStore.volumeInterval {
             request.diskSpace = false

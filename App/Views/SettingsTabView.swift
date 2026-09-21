@@ -92,6 +92,20 @@ struct SettingsTabView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Toggle("Tint hot temperatures", isOn: $settings.tintsHotTemperatures)
+                    .help("Amber at 70 °C, orange at 80 °C, red at 90 °C, whatever unit the label shows")
+                Toggle("Spin the fan icon", isOn: $settings.spinsFanIcon)
+                    .help("The symbol turns with the fastest fan, and stands still while the fans do")
+                    .disabled(!settings.showMenuBarIcon && !isIconOnly)
+            } header: {
+                Text("Menu bar")
+            } footer: {
+                Text("Only the temperature itself changes colour, and only the value, not the caption. The fan turns from one revolution in three seconds at its slowest to one in half a second at full speed; it stands still at 0 rpm, in Low Power Mode and with Reduce Motion on.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Sampling") {
                 Picker("Refresh interval", selection: $settings.refreshInterval) {
                     ForEach(RefreshInterval.allCases) { interval in

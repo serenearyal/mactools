@@ -1,6 +1,7 @@
 import AppKit
 import AwakeKit
 import Observation
+import SMCKit
 import SwiftUI
 import WindowKit
 
@@ -21,6 +22,29 @@ final class StatusItemController: NSObject {
     /// menu bar, and the light keeps its own colour on top of it.
     private let ledLayer = CALayer()
     private var lastLED: AwakeLED?
+    /// The fan glyph, for the same reason one step further: a layer can turn
+    /// without anything being drawn again.
+    private let fanIcon = FanIconLayer()
+    /// The heat each metric was last drawn at, which is where the hysteresis
+    /// of `HeatTint` lives.
+    private var heatMemory: [MenuBarMetric: HeatLevel] = [:]
+    /// The menu bar appearance the label's colours were resolved against. A
+    /// tinted label is not a template image, so nothing tints it for us, and a
+    /// wallpaper that flips the menu bar has to reach it.
+    private var appearanceObservation: NSKeyValueObservation?
+    private var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    private var systemAsleep = false
+    /// `--fake-cpu-temp` and `--fake-fan-rpm`, for the capture and measurement
+    /// runs. Nil in every build the user ever launches by hand.
+    private var fakeCelsius: Double?
+    private var fakeFanRPM: Double?
+    /// What the spin rule last decided, for the capture status file.
+    private(set) var spinConditions = FanSpinConditions()
+    /// True while the fan glyph is really turning.
+    var isFanSpinning: Bool { fanIcon.isSpinning }
+    /// One revolution in this many seconds, or nil while it stands still.
+    var fanSpinSeconds: Double? { fanIcon.secondsPerRevolution }
+    var fanAngle: CGFloat { fanIcon.currentAngle }
     /// The rendered labels, newest first. Small on purpose: the label of a Mac
     /// that is working changes every second, so this is only ever a hit on the
     /// values that repeat - a placeholder, a temperature that sits still, the
@@ -29,6 +53,7 @@ final class StatusItemController: NSObject {
     private var images = LRUCache<MenuBarLabelKey, NSImage>(capacity: 24)
     private var screenObserver: NSObjectProtocol?
     private var moveObserver: NSObjectProtocol?
+    private var workspaceObservers: [NSObjectProtocol] = []
     /// What `isLabelOnScreen` last answered, so a move that changes nothing
     /// does not republish the demand.
     private var wasLabelOnScreen = true
@@ -40,10 +65,16 @@ final class StatusItemController: NSObject {
     /// the system adds. `statusItem.length` stays at the variable-length
     /// sentinel, so the button window is the only honest source.
     var itemWidth: CGFloat { statusItem.button?.window?.frame.width ?? 0 }
-    /// The button as it is drawn, light included, at 4x on a dark plate: the
-    /// status item's window belongs to the system and cannot be photographed.
+    /// The button as it is drawn, light and glyph included, at 4x on the plate
+    /// its own appearance would put it on: the status item's window belongs to
+    /// the system and cannot be photographed.
+    ///
+    /// The plate follows the appearance on purpose. Everything the label draws
+    /// in the menu bar's own colour is white on a dark bar, and a white glyph
+    /// on a light grey plate is a picture of nothing.
     func debugButtonSnapshot() -> NSBitmapImageRep? {
         guard let button = statusItem.button, let layer = button.layer else { return nil }
+        let dark = MenuBarLabelImage.templateColor(for: button.effectiveAppearance) == .white
         let scale: CGFloat = 4
         let size = button.bounds.size
         guard let rep = NSBitmapImageRep(
@@ -52,14 +83,25 @@ final class StatusItemController: NSObject {
             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
         ), let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
         let cg = context.cgContext
-        cg.setFillColor(NSColor(white: 0.85, alpha: 1).cgColor)
-        cg.fill(CGRect(x: 0, y: 0, width: size.width * scale, height: size.height * scale))
+        cg.saveGState()
         cg.scaleBy(x: scale, y: scale)
         if button.isFlipped {
             cg.translateBy(x: 0, y: size.height)
             cg.scaleBy(x: 1, y: -1)
         }
-        layer.render(in: cg)
+        // The presentation layer, not the model one: a rotation that Core
+        // Animation is running lives only there, and the model layer would
+        // photograph the glyph upright however fast it is turning.
+        (layer.presentation() ?? layer).render(in: cg)
+        cg.restoreGState()
+        // The plate goes in afterwards, underneath. The button's own backing
+        // layer clears its bounds before it draws, so a plate laid down first
+        // is wiped and the capture comes out transparent - which is what every
+        // one of these files was until this line.
+        cg.setBlendMode(.destinationOver)
+        cg.setFillColor(NSColor(white: dark ? 0.13 : 0.85, alpha: 1).cgColor)
+        cg.fill(CGRect(x: 0, y: 0, width: size.width * scale, height: size.height * scale))
+        context.flushGraphics()
         return rep
     }
 
@@ -149,6 +191,20 @@ final class StatusItemController: NSObject {
             button.wantsLayer = true
             ledLayer.zPosition = 1
             button.layer?.addSublayer(ledLayer)
+            button.layer?.addSublayer(fanIcon.layer)
+            // The menu bar is dark or light on its own account: it follows a
+            // dark wallpaper in Light Mode too. A template image never had to
+            // care; a tinted label and the glyph layer do.
+            appearanceObservation = button.observe(\.effectiveAppearance) { [weak self] _, _ in
+                // AppKit changes an appearance on the main thread and nowhere
+                // else, so this is already where it has to be; the hop is for
+                // the day that stops being true.
+                if Thread.isMainThread {
+                    MainActor.assumeIsolated { self?.appearanceChanged() }
+                } else {
+                    DispatchQueue.main.async { self?.appearanceChanged() }
+                }
+            }
         }
 
         screenObserver = NotificationCenter.default.addObserver(
@@ -182,11 +238,85 @@ final class StatusItemController: NSObject {
                 self.publishLabelVisibility()
             }
         }
+        observeMotionAndPower()
 
         track()
     }
 
+    /// The three pushes that stop the fan and never change a number: Reduce
+    /// Motion, the sleep of the Mac, and the wake after it. Low Power Mode
+    /// arrives through `KeepAwakeController`, which already holds the one
+    /// subscription the app has for it.
+    private func observeMotionAndPower() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspaceObservers = [
+            workspace.addObserver(
+                forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                    // Reduce Motion decides where the glyph is drawn, not only
+                    // whether it turns, so the label itself is rebuilt.
+                    self.refresh(force: true)
+                }
+            },
+            workspace.addObserver(
+                forName: NSWorkspace.willSleepNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.systemAsleep = true
+                    self?.refresh(force: false)
+                }
+            },
+            workspace.addObserver(
+                forName: NSWorkspace.didWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.systemAsleep = false
+                    self?.refresh(force: false)
+                }
+            },
+        ]
+    }
+
+    /// The menu bar flipped between light and dark: everything whose colour was
+    /// resolved from it has to be drawn again.
+    private func appearanceChanged() {
+        AppLog.app.info(
+            "menu bar appearance: \(self.statusItem.button?.effectiveAppearance.name.rawValue ?? "none", privacy: .public)"
+        )
+        refresh(force: true)
+    }
+
     // MARK: - Rendering
+
+    /// Everything one pass of the label is built from.
+    private struct LabelState {
+        var cells: [MenuBarCell] = []
+        var style: MenuBarLabelStyle = .twoLine
+        var icon = true
+        var awake = false
+        var led: AwakeLED = .green
+        /// The heat of each cell, in the order of `cells`. Empty while nothing
+        /// is hot, which is the template path.
+        var tints: [HeatLevel] = []
+        /// The fastest fan, when the glyph is allowed to turn with it.
+        var fan: FanReading?
+        var lowPowerMode = false
+        /// The glyph is in the label at all.
+        var showsGlyph = true
+        /// The glyph is drawn by its own layer rather than into the bitmap.
+        /// False is the old path, kept for everybody who has the spin off:
+        /// a template image the system tints, with nothing to resolve.
+        var glyphInLayer = true
+    }
 
     /// Re-runs whenever a value the label shows changes, and never otherwise.
     ///
@@ -195,18 +325,62 @@ final class StatusItemController: NSObject {
     /// shows the CPU and the temperature.
     private func track() {
         let state = withObservationTracking {
-            (
-                MenuBarLabel.cells(snapshot: labelSnapshot, settings: settings),
-                settings.labelStyle,
-                settings.showMenuBarIcon,
-                AppServices.shared.keepAwake.isOn,
-                AppServices.shared.keepAwake.blocking.led
-            )
+            labelState()
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in self?.track() }
         }
-        render(cells: state.0, style: state.1, icon: state.2, awake: state.3, force: false)
-        placeLED(state.4, cells: state.0, icon: state.2)
+        apply(state, force: false)
+    }
+
+    /// One pass of the label, read out of the settings and the store.
+    private func labelState() -> LabelState {
+        let keepAwake = AppServices.shared.keepAwake
+        let snapshot = labelSnapshot
+        let cells = MenuBarLabel.cells(snapshot: snapshot, settings: settings)
+        let showsGlyph = settings.showMenuBarIcon || cells.isEmpty
+        let spins = settings.spinsFanIcon && !reduceMotion
+        return LabelState(
+            cells: cells,
+            style: settings.labelStyle,
+            icon: settings.showMenuBarIcon,
+            awake: keepAwake.isOn,
+            led: keepAwake.blocking.led,
+            tints: MenuBarLabel.heatLevels(
+                cells: cells,
+                snapshot: snapshot,
+                settings: settings,
+                previous: heatMemory
+            ),
+            // Only read while the glyph may turn: with the spin off, nothing
+            // in this controller ever looks at a fan.
+            fan: showsGlyph && spins ? snapshot.fastestFan : nil,
+            lowPowerMode: keepAwake.power.lowPowerMode,
+            showsGlyph: showsGlyph,
+            glyphInLayer: showsGlyph && spins
+        )
+    }
+
+    /// Draws the pass: the bitmap, the status light, the glyph and its speed,
+    /// in that order. The light and the glyph are placed against the image
+    /// that was just set, so the image has to come first.
+    private func apply(_ state: LabelState, force: Bool) {
+        remember(state)
+        render(state: state, force: force)
+        placeLED(state.led, cells: state.cells, icon: state.icon)
+        placeGlyph(state)
+        spin(state)
+    }
+
+    /// The level each metric was drawn at, which the next pass compares
+    /// against. An empty list means nothing was tinted at all.
+    private func remember(_ state: LabelState) {
+        guard !state.tints.isEmpty else {
+            heatMemory.removeAll(keepingCapacity: true)
+            return
+        }
+        for (index, cell) in state.cells.enumerated() where index < state.tints.count {
+            heatMemory[cell.metric] = state.tints[index]
+        }
     }
 
     /// Centred under the fan, in the button's coordinates. The button centres
@@ -237,29 +411,159 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// Only the domains the label draws.
-    private var labelSnapshot: MetricsSnapshot {
-        store.snapshot(
-            for: SamplingPlan.menuBarRequest(
-                metrics: settings.menuBarMetrics,
-                chosenSensorScope: .labelled
+    /// The fan glyph, in the box the bitmap reserved for it, in the button's
+    /// coordinates. The same arithmetic as the status light, because the two
+    /// are placed against the same image.
+    private func placeGlyph(_ state: LabelState) {
+        guard let button = statusItem.button else { return }
+        guard state.glyphInLayer,
+              let frame = MenuBarLabelImage.iconFrame(
+                  cells: state.cells,
+                  style: state.style,
+                  showIcon: state.icon,
+                  awake: state.awake
+              )
+        else {
+            fanIcon.place(
+                box: nil,
+                awake: false,
+                solo: false,
+                color: .black,
+                scale: 1,
+                geometryFlipped: button.isFlipped
             )
+            return
+        }
+        let origin = CGPoint(
+            x: ((button.bounds.width - lastImageSize.width) / 2).rounded(),
+            y: ((button.bounds.height - lastImageSize.height) / 2).rounded()
+        )
+        let y = button.isFlipped
+            ? button.bounds.height - origin.y - frame.maxY
+            : origin.y + frame.minY
+        fanIcon.place(
+            box: CGRect(x: origin.x + frame.minX, y: y, width: frame.width, height: frame.height),
+            awake: state.awake,
+            solo: state.cells.isEmpty,
+            color: MenuBarLabelImage.templateColor(for: statusItem.button?.effectiveAppearance),
+            scale: backingScale,
+            geometryFlipped: button.isFlipped
         )
     }
 
+    /// Where the glyph's rotation centre sits, back in the label's own
+    /// bottom-left coordinates.
+    ///
+    /// The capture path checks it against the point the bitmap draws the hub
+    /// at: the glyph left the image, and the proof that it did not move is a
+    /// number rather than a look.
+    var glyphHubInLabel: CGPoint? {
+        guard let button = statusItem.button, !fanIcon.layer.isHidden else { return nil }
+        let origin = CGPoint(
+            x: ((button.bounds.width - lastImageSize.width) / 2).rounded(),
+            y: ((button.bounds.height - lastImageSize.height) / 2).rounded()
+        )
+        let position = fanIcon.layer.position
+        return CGPoint(
+            x: position.x - origin.x,
+            y: button.isFlipped
+                ? button.bounds.height - position.y - origin.y
+                : position.y - origin.y
+        )
+    }
+
+    /// How fast the glyph turns, or that it stands still.
+    private func spin(_ state: LabelState) {
+        let conditions = FanSpinConditions(
+            rpm: state.fan?.actual,
+            minimumRPM: state.fan?.minimum ?? 0,
+            maximumRPM: state.fan?.maximum ?? 0,
+            showsIcon: state.glyphInLayer,
+            spinEnabled: settings.spinsFanIcon,
+            reduceMotion: reduceMotion,
+            labelOnScreen: isLabelOnScreen,
+            systemAsleep: systemAsleep,
+            lowPowerMode: state.lowPowerMode
+        )
+        spinConditions = conditions
+        fanIcon.spin(secondsPerRevolution: FanSpin.secondsPerRevolution(conditions))
+    }
+
+    /// Only the domains the label draws.
+    private var labelSnapshot: MetricsSnapshot {
+        var snapshot = store.snapshot(
+            for: SamplingPlan.menuBarRequest(
+                metrics: settings.menuBarMetrics,
+                chosenSensorScope: .labelled,
+                spinsFanIcon: settings.spinsFanIcon
+                    && (settings.showMenuBarIcon || settings.menuBarMetrics.isEmpty)
+            )
+        )
+        if let fakeCelsius {
+            snapshot.temperatures = [
+                TemperatureReading(
+                    key: "Tp01",
+                    label: "CPU performance core 1",
+                    category: .cpuPerformance,
+                    celsius: fakeCelsius
+                ),
+            ]
+        }
+        if let fakeFanRPM {
+            let real = snapshot.fastestFan
+            snapshot.fans = [
+                FanReading(
+                    index: real?.index ?? 0,
+                    actual: fakeFanRPM,
+                    minimum: real?.minimum ?? 1200,
+                    maximum: real?.maximum ?? 4000,
+                    target: fakeFanRPM,
+                    mode: real?.mode ?? .auto
+                ),
+            ]
+        }
+        return snapshot
+    }
+
+    /// `--fake-cpu-temp <celsius>`: a temperature this Mac will not reach on
+    /// demand, so the heat tint can be photographed. It changes what the label
+    /// draws for this run and nothing else; nothing is persisted, and no
+    /// sensor is written.
+    func overrideCPUTemperature(_ celsius: Double) {
+        fakeCelsius = celsius
+        refresh(force: true)
+    }
+
+    /// `--fake-fans --fake-fan-rpm <rpm>`: a fan speed for the glyph, on a Mac
+    /// whose fans idle at 0 rpm and may never be commanded by a test. It feeds
+    /// the label and the spin rule only.
+    func overrideFanRPM(_ rpm: Double) {
+        fakeFanRPM = rpm
+        refresh(force: true)
+    }
+
+    /// The three lines the capture status file needs about the button itself.
+    var isButtonFlipped: Bool { statusItem.button?.isFlipped ?? false }
+    var buttonAppearanceName: String {
+        statusItem.button?.effectiveAppearance.name.rawValue ?? "none"
+    }
+
+    var labelFanSummary: String {
+        let fans = labelSnapshot.fans
+        guard !fans.isEmpty else { return "none" }
+        return fans
+            .map { "\($0.index): \(Int($0.actual)) rpm of \(Int($0.minimum))-\(Int($0.maximum))" }
+            .joined(separator: " | ")
+    }
+
+    private var backingScale: CGFloat {
+        statusItem.button?.window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? 2
+    }
+
     private func refresh(force: Bool) {
-        render(
-            cells: MenuBarLabel.cells(snapshot: labelSnapshot, settings: settings),
-            style: settings.labelStyle,
-            icon: settings.showMenuBarIcon,
-            awake: AppServices.shared.keepAwake.isOn,
-            force: force
-        )
-        placeLED(
-            AppServices.shared.keepAwake.blocking.led,
-            cells: MenuBarLabel.cells(snapshot: labelSnapshot, settings: settings),
-            icon: settings.showMenuBarIcon
-        )
+        apply(labelState(), force: force)
     }
 
     /// Draws the label, and only when something it shows really changed.
@@ -270,17 +574,22 @@ final class StatusItemController: NSObject {
     /// left is drawn straight into a bitmap by `MenuBarLabelImage`;
     /// `ImageRenderer` used to do it and cost about thirty times as much,
     /// once a second, for ever.
-    private func render(
-        cells: [MenuBarCell],
-        style: MenuBarLabelStyle,
-        icon: Bool,
-        awake: Bool,
-        force: Bool
-    ) {
-        let scale = statusItem.button?.window?.backingScaleFactor
-            ?? NSScreen.main?.backingScaleFactor
-            ?? 2
-        let key = MenuBarLabelKey(cells: cells, style: style, icon: icon, awake: awake, scale: scale)
+    private func render(state: LabelState, force: Bool) {
+        let scale = backingScale
+        let appearance = statusItem.button?.effectiveAppearance
+        let tinted = state.tints.contains(where: \.isTinted)
+        let key = MenuBarLabelKey(
+            cells: state.cells,
+            style: state.style,
+            icon: state.icon,
+            awake: state.awake,
+            scale: scale,
+            tints: state.tints,
+            // Only a tinted label carries colours of its own, so only a tinted
+            // label has to be drawn again when the menu bar flips.
+            appearance: tinted ? appearance?.name.rawValue : nil,
+            drawsIcon: !state.glyphInLayer
+        )
         guard force || key != lastKey else { return }
         lastKey = key
 
@@ -289,11 +598,15 @@ final class StatusItemController: NSObject {
             image = cached
         } else {
             guard let drawn = MenuBarLabelImage.image(
-                cells: cells,
-                style: style,
-                showIcon: icon,
-                awake: awake,
-                scale: scale
+                cells: state.cells,
+                style: state.style,
+                showIcon: state.icon,
+                awake: state.awake,
+                scale: scale,
+                tints: state.tints,
+                baseColor: MenuBarLabelImage.templateColor(for: appearance),
+                appearance: appearance,
+                drawsIcon: !state.glyphInLayer
             ) else { return }
             images.insert(drawn, forKey: key)
             image = drawn
@@ -312,6 +625,19 @@ final class StatusItemController: NSObject {
         wasLabelOnScreen = onScreen
         AppLog.app.notice("status item on screen: \(onScreen, privacy: .public)")
         AppServices.shared.refreshDemand()
+        // A glyph the menu bar has parked behind the notch turns for nobody.
+        refresh(force: false)
+    }
+
+    /// `--appearance dark|light` for the status item itself.
+    ///
+    /// The menu bar's own window belongs to the system and cannot be
+    /// photographed, so a capture run gives the button the appearance it wants
+    /// to see. It is our own view, nothing about the system changes, and it
+    /// goes through the same KVO the real flip does: the capture is the proof
+    /// that the observer fires and that the colours are resolved again.
+    func overrideButtonAppearance(dark: Bool) {
+        statusItem.button?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
     }
 
     /// `--no-activate`, for a capture run: the popover appears without taking

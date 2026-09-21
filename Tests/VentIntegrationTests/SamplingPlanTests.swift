@@ -344,6 +344,55 @@ struct SamplingPlanTests {
         #expect(!SamplingPlan.pollsFans(closed))
     }
 
+    // MARK: - The fan glyph that turns with the fans
+
+    @Test("A spinning glyph asks for the fans, and only then")
+    func spinningGlyphRequest() {
+        let still = SamplingPlan.menuBarRequest(metrics: menuBar, chosenSensorScope: .labelled)
+        #expect(!still.fans)
+        let spinning = SamplingPlan.menuBarRequest(
+            metrics: menuBar,
+            chosenSensorScope: .labelled,
+            spinsFanIcon: true
+        )
+        #expect(spinning.fans)
+        // And nothing else moves: the glyph is one more thing the label draws,
+        // not a reason to read the memory or the disk.
+        #expect(spinning == SampleRequest(cpu: true, temperatures: .cpu, fans: true))
+    }
+
+    @Test("With the spin off and no fan metric, nothing about a fan is read")
+    func noFanReadsWithoutTheGlyph() {
+        let plan = SamplingPlan.metricsRequest(
+            demand: SamplingDemand(),
+            menuBarMetrics: menuBar,
+            chosenSensorScope: .labelled,
+            showsUnlabelledSensors: false,
+            spinsFanIcon: false
+        )
+        #expect(!plan.fans)
+    }
+
+    @Test("A label nobody can see keeps the fans asleep however fast they turn")
+    func spinningGlyphOffScreen() {
+        var hidden = SamplingDemand()
+        hidden.menuBarShowsMetrics = false
+        let plan = SamplingPlan.metricsRequest(
+            demand: hidden,
+            menuBarMetrics: menuBar,
+            chosenSensorScope: .labelled,
+            showsUnlabelledSensors: false,
+            spinsFanIcon: true
+        )
+        #expect(plan == .nothing)
+        #expect(plan.readsNothing)
+        #expect(!SamplingPlan.samplesMetrics(
+            demand: hidden,
+            menuBarMetrics: menuBar,
+            spinsFanIcon: true
+        ))
+    }
+
     // MARK: - A label nobody can read
 
     @Test("Icon only asks for nothing at all, not even the one CPU call")
