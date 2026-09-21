@@ -3,7 +3,7 @@ import SMCKit
 import SwiftUI
 
 /// One metric as it appears in the status item.
-struct MenuBarCell: Equatable, Identifiable {
+struct MenuBarCell: Hashable, Identifiable {
     let metric: MenuBarMetric
     let caption: String
     let value: String

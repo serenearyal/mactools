@@ -197,29 +197,50 @@ struct SearchField: View {
 }
 
 /// A tiny line chart with no axes, for a table cell or a card corner.
+///
+/// One `Canvas` and one `Path`, not a `Chart`.
+///
+/// It used to be a chart with a `LineMark` per sample, which is 300 marks for
+/// five minutes of history, each one a view with its own layout. The profiler
+/// put SwiftUI layout at the top of everything an open popover does, and this
+/// was it: the popover redraws its sparkline on every pass. At 96 x 18 pt the
+/// 300 points are a third of a point apart, so the line is the same line.
 struct Sparkline: View {
     let values: [Double]
     var tint: Color = .accentColor
     var minimumRange: Double = 1
 
     var body: some View {
-        Chart {
-            ForEach(Array(values.enumerated()), id: \.offset) { index, value in
-                LineMark(
-                    x: .value("Sample", index),
-                    y: .value("Value", value)
-                )
-                .interpolationMethod(.monotone)
-                .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                .foregroundStyle(tint)
+        Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+            guard values.count > 1, size.width > 0, size.height > 0 else { return }
+            context.stroke(
+                path(in: size),
+                with: .color(tint),
+                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+            )
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func path(in size: CGSize) -> Path {
+        let domain = domain
+        let span = Swift.max(domain.upperBound - domain.lowerBound, 0.000_001)
+        let step = size.width / Double(values.count - 1)
+        // Half the line width in from each edge, so a value at the very top or
+        // the very bottom is not clipped in half.
+        let inset = 0.75
+        let height = Swift.max(size.height - inset * 2, 0)
+        var path = Path()
+        for (index, value) in values.enumerated() {
+            let fraction = ((value - domain.lowerBound) / span).clamped(to: 0...1)
+            let point = CGPoint(x: Double(index) * step, y: inset + height * (1 - fraction))
+            if index == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
             }
         }
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
-        .chartLegend(.hidden)
-        .chartYScale(domain: domain)
-        .chartPlotStyle { plot in plot.background(.clear) }
-        .allowsHitTesting(false)
+        return path
     }
 
     private var domain: ClosedRange<Double> {

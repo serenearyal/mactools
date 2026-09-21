@@ -54,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         services.windowController.onHidden = { [weak controller] in
             controller?.showMenuBarTipIfNeeded()
         }
+        // Now that the status item exists: what the label draws and what the
+        // battery says both decide how much the app samples.
+        services.startObservingEnvironment()
         // The Dock icon is a setting, so the policy above is only the default.
         applyActivationPolicy(services: services)
         trackDockIconSetting(services: services)
@@ -187,8 +190,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let size = parseSize(arguments[index + 1]) {
             services.windowController.forceContentSize(size)
         }
+        // `--menu-bar-label on|off`: pretend the status item label is drawing
+        // numbers, or is not, whatever the menu bar has room for today. The
+        // measurement script needs both states on purpose.
+        if let index = arguments.firstIndex(of: "--menu-bar-label"), index + 1 < arguments.count {
+            services.overrideLabelVisibility(arguments[index + 1].lowercased() == "on")
+        }
+        // `--power-rules off`: sample as if the Mac were on wall power, out of
+        // Low Power Mode and cool, whatever it really is. A budget measured on
+        // a laptop in Low Power Mode would otherwise only hold there.
+        if let index = arguments.firstIndex(of: "--power-rules"), index + 1 < arguments.count {
+            services.overridePowerRules(arguments[index + 1].lowercased() != "off")
+        }
+        // `--window-front`: order the window on top without activating, for
+        // `scripts/measure_idle.sh`. A window that is ordered back sits under
+        // the user's own windows, which makes it occluded, and an occluded
+        // window samples at the idle cadence and is not drawn at all.
+        if arguments.contains("--window-front") {
+            services.windowController.orderFrontWithoutActivation()
+        }
         if arguments.contains("--show-window") {
             services.windowController.show()
+        }
+        // `--popover-offscreen`: the popover's SwiftUI content and its sampling
+        // demand in a borderless window off the corner of the screen, because a
+        // real popover never appears for an app that is not active. The
+        // measurement script is the only caller.
+        if arguments.contains("--popover-offscreen") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                services.statusItemController?.showOffscreenPopover()
+            }
         }
         // `--show-popover` opens the dropdown without a click, and keeps it
         // open whatever else takes the front, so a capture run can photograph
@@ -304,6 +335,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 outputDirectory: output,
                 services: services
             )
+        }
+        // `--label-bench <directory>`: what one menu bar label costs through
+        // `ImageRenderer` and through the direct draw, plus the pixel
+        // difference between the two. It is the evidence behind the choice.
+        if let index = arguments.firstIndex(of: "--label-bench"), index + 1 < arguments.count {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                DebugCapture.benchmarkLabel(directory: arguments[index + 1], services: services)
+            }
         }
         DebugFanBackend.applyLaunchArguments(arguments, to: services.fans)
         DebugCapture.run(arguments: arguments, services: services)

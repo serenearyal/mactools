@@ -23,6 +23,8 @@ final class MainWindowController {
     private var forcedContentSize: CGSize?
     /// `--no-activate`. See `suppressActivation()`.
     private var activates = true
+    /// `--window-front`. See `orderFrontWithoutActivation()`.
+    private var ordersFront = false
     /// The last value `updateVisibility` published, so the first close can be
     /// told from the launch of an app that has no window yet.
     private var wasVisible = false
@@ -108,6 +110,22 @@ final class MainWindowController {
         activates = false
     }
 
+    /// `--window-front`, for `scripts/measure_idle.sh` alone: the window is
+    /// ordered on top without taking the front or the key focus.
+    ///
+    /// A measurement run needs a window that is really being drawn. Ordered
+    /// back, the window is covered by whatever the user has open, AppKit marks
+    /// it occluded, the store drops to the idle cadence and SwiftUI stops
+    /// drawing it, so the number would be of another state entirely. This
+    /// changes nothing about the focus rule: no activation, no key window.
+    func orderFrontWithoutActivation() {
+        ordersFront = true
+        if let window, window.isVisible {
+            window.orderFrontRegardless()
+            updateVisibility()
+        }
+    }
+
     private func applyForcedSize(to window: NSWindow) {
         guard let size = forcedContentSize else { return }
         window.setContentSize(size)
@@ -126,7 +144,7 @@ final class MainWindowController {
     private func bringToFront(_ window: NSWindow) {
         pendingActivation = false
         guard activates else {
-            window.orderBack(nil)
+            if ordersFront { window.orderFrontRegardless() } else { window.orderBack(nil) }
             updateVisibility()
             return
         }

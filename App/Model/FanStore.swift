@@ -125,11 +125,17 @@ final class FanStore {
         self.demand = demand
         let wanted = SamplingPlan.pollsFans(demand)
         if wanted, pollTask == nil {
-            pollTask = Task { @MainActor [weak self] in
+            // `.utility`: a fan snapshot is an XPC round trip to the helper,
+            // and nothing about it is user-interactive.
+            pollTask = Task.detached(priority: .utility) { [weak self] in
                 while !Task.isCancelled {
                     guard let self else { return }
-                    await refresh()
-                    try? await Task.sleep(for: FanStore.pollInterval)
+                    await self.refresh()
+                    guard !Task.isCancelled else { return }
+                    try? await Task.sleep(
+                        for: FanStore.pollInterval,
+                        tolerance: SamplingPlan.tolerance(for: FanStore.pollInterval)
+                    )
                 }
             }
         } else if !wanted {
@@ -143,8 +149,10 @@ final class FanStore {
         do {
             let fresh = try await backend.snapshot()
             let reconnected = snapshot == nil
-            snapshot = fresh
-            failure = fresh.readError
+            // Only on a change: a fan that holds 2000 rpm for a minute must
+            // not invalidate the views that draw it thirty times.
+            if fresh != snapshot { snapshot = fresh }
+            if fresh.readError != failure { failure = fresh.readError }
             // The helper forgets every mode when the last client leaves, so a
             // fresh connection is the moment to say what the fans should do.
             if reconnected || !hasApplied {

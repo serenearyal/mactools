@@ -40,25 +40,31 @@ struct OverviewCards: View {
     let settings: AppSettings
     let twoColumns: Bool
 
+    /// Every card takes the store, not a snapshot of it.
+    ///
+    /// A snapshot is one value: handing it down means this body reads every
+    /// domain, so a pass that only moved the CPU invalidates the four cards and
+    /// the grid around them. Reading `store.memory` inside the memory card is
+    /// what keeps each card's redraw to its own numbers.
     @ViewBuilder
     var body: some View {
         if twoColumns {
             Grid(horizontalSpacing: Layout.cardSpacing, verticalSpacing: Layout.cardSpacing) {
                 GridRow(alignment: .top) {
                     CPUCard(store: store)
-                    MemoryCard(snapshot: store.snapshot, history: store.history)
+                    MemoryCard(store: store)
                 }
                 GridRow(alignment: .top) {
-                    StorageCard(snapshot: store.snapshot, history: store.history)
-                    ThermalsCard(snapshot: store.snapshot, settings: settings)
+                    StorageCard(store: store)
+                    ThermalsCard(store: store, settings: settings)
                 }
             }
         } else {
             VStack(spacing: Layout.cardSpacing) {
                 CPUCard(store: store)
-                MemoryCard(snapshot: store.snapshot, history: store.history)
-                StorageCard(snapshot: store.snapshot, history: store.history)
-                ThermalsCard(snapshot: store.snapshot, settings: settings)
+                MemoryCard(store: store)
+                StorageCard(store: store)
+                ThermalsCard(store: store, settings: settings)
             }
         }
     }
@@ -69,17 +75,17 @@ struct OverviewCards: View {
 private struct CPUCard: View {
     let store: MetricsStore
 
-    private var total: Double { store.snapshot.cpu?.total.percent ?? 0 }
+    private var total: Double { store.cpu?.total.percent ?? 0 }
 
     var body: some View {
         Card(title: "CPU", symbolName: "cpu") {
             HStack(alignment: .firstTextBaseline, spacing: Layout.gutter) {
-                Text(store.snapshot.cpu == nil ? "--" : Fmt.compactPercent(total))
+                Text(store.cpu == nil ? "--" : Fmt.compactPercent(total))
                     .font(.system(size: 28, weight: .semibold))
                     .monospacedDigit()
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("user \(Fmt.percent(store.snapshot.cpu?.total.user ?? 0, fractionDigits: 1))")
-                    Text("system \(Fmt.percent(store.snapshot.cpu?.total.system ?? 0, fractionDigits: 1))")
+                    Text("user \(Fmt.percent(store.cpu?.total.user ?? 0, fractionDigits: 1))")
+                    Text("system \(Fmt.percent(store.cpu?.total.system ?? 0, fractionDigits: 1))")
                 }
                 .font(.caption)
                 .monospacedDigit()
@@ -106,7 +112,7 @@ private struct CPUCard: View {
     }
 
     private var cores: [CoreLoad] {
-        guard let cpu = store.snapshot.cpu else { return [] }
+        guard let cpu = store.cpu else { return [] }
         var efficiency = 0
         var performance = 0
         return cpu.cores.enumerated().map { index, usage in
@@ -182,12 +188,11 @@ private struct CoreLoad: Identifiable {
 // MARK: - Memory
 
 private struct MemoryCard: View {
-    let snapshot: MetricsSnapshot
-    let history: MetricsHistory
+    let store: MetricsStore
 
     var body: some View {
         Card(title: "Memory", symbolName: "memorychip") {
-            if let memory = snapshot.memory {
+            if let memory = store.memory {
                 HStack(alignment: .firstTextBaseline, spacing: Layout.gutter) {
                     Text("\(Fmt.memorySize(memory.used)) of \(Fmt.memorySize(memory.total))")
                         .font(.title3.weight(.medium))
@@ -234,7 +239,7 @@ private struct MemoryCard: View {
                     Text("Recent history")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    Sparkline(values: Array(history.memoryUsed), minimumRange: 5)
+                    Sparkline(values: Array(store.history.memoryUsed), minimumRange: 5)
                         .frame(height: 24)
                 }
             } else {
@@ -247,12 +252,11 @@ private struct MemoryCard: View {
 // MARK: - Storage
 
 private struct StorageCard: View {
-    let snapshot: MetricsSnapshot
-    let history: MetricsHistory
+    let store: MetricsStore
 
     var body: some View {
         Card(title: "Storage", symbolName: "internaldrive") {
-            if let volume = snapshot.bootVolume {
+            if let volume = store.bootVolume {
                 Text("\(Fmt.storageSize(volume.used)) of \(Fmt.storageSize(volume.total)) used")
                     .font(.title3.weight(.medium))
                     .monospacedDigit()
@@ -279,19 +283,19 @@ private struct StorageCard: View {
                     VStack(alignment: .leading, spacing: 6) {
                         StatBlock(
                             caption: "Read",
-                            value: Fmt.throughput(snapshot.diskIO?.bytesReadPerSecond ?? 0),
+                            value: Fmt.throughput(store.diskIO?.bytesReadPerSecond ?? 0),
                             size: .callout
                         )
-                        Sparkline(values: Array(history.diskRead), minimumRange: 1_000_000)
+                        Sparkline(values: Array(store.history.diskRead), minimumRange: 1_000_000)
                             .frame(height: 20)
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         StatBlock(
                             caption: "Write",
-                            value: Fmt.throughput(snapshot.diskIO?.bytesWrittenPerSecond ?? 0),
+                            value: Fmt.throughput(store.diskIO?.bytesWrittenPerSecond ?? 0),
                             size: .callout
                         )
-                        Sparkline(values: Array(history.diskWrite), tint: .accentColor.opacity(0.6), minimumRange: 1_000_000)
+                        Sparkline(values: Array(store.history.diskWrite), tint: .accentColor.opacity(0.6), minimumRange: 1_000_000)
                             .frame(height: 20)
                     }
                 }
@@ -309,24 +313,24 @@ private struct StorageCard: View {
 // MARK: - Thermals
 
 private struct ThermalsCard: View {
-    let snapshot: MetricsSnapshot
+    let store: MetricsStore
     let settings: AppSettings
 
     var body: some View {
         Card(title: "Thermals", symbolName: "thermometer.medium") {
-            if snapshot.temperatures.isEmpty && snapshot.fans.isEmpty {
+            if store.temperatures.isEmpty && store.fans.isEmpty {
                 CardPlaceholder()
             } else {
                 Grid(alignment: .leading, horizontalSpacing: Layout.cardPadding, verticalSpacing: Layout.gutter * 1.5) {
                     GridRow {
-                        temperatureBlock("CPU", reading: snapshot.hottestCPU)
+                        temperatureBlock("CPU", reading: store.hottestCPU)
                             .gridColumnAlignment(.leading)
-                        temperatureBlock("GPU", reading: snapshot.hottest(in: .gpu))
+                        temperatureBlock("GPU", reading: store.hottest(in: .gpu))
                             .gridColumnAlignment(.leading)
                     }
                     GridRow {
-                        temperatureBlock("SSD", reading: snapshot.hottest(in: .ssd))
-                        temperatureBlock("Battery", reading: snapshot.hottest(in: .battery))
+                        temperatureBlock("SSD", reading: store.hottest(in: .ssd))
+                        temperatureBlock("Battery", reading: store.hottest(in: .battery))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -336,11 +340,11 @@ private struct ThermalsCard: View {
                 HStack(alignment: .top, spacing: Layout.cardPadding) {
                     StatBlock(
                         caption: "System power",
-                        value: snapshot.systemPower.map { Fmt.watts($0.watts) } ?? "--",
+                        value: store.systemPower.map { Fmt.watts($0.watts) } ?? "--",
                         size: .callout
                     )
                     Spacer(minLength: 0)
-                    ForEach(snapshot.fans, id: \.index) { fan in
+                    ForEach(store.fans, id: \.index) { fan in
                         StatBlock(
                             caption: "Fan \(fan.index + 1)",
                             value: Fmt.rpm(fan.actual),

@@ -183,7 +183,7 @@ struct PopoverTools: View {
     }
 
     private var fanDetail: String {
-        let rows = FanRow.rows(fans: fans, snapshot: services.store.snapshot)
+        let rows = FanRow.rows(fans: fans, smcFans: services.store.fans)
         guard !rows.isEmpty else {
             return fans.isAvailable ? "No fan on this Mac" : "Not available"
         }

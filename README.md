@@ -387,6 +387,55 @@ A slider and an Auto toggle for the built-in keyboard's backlight, through the p
 - **Auto brightness.** Vent changes it only on an explicit click, in the popover chip or the tab's switch. While Auto is on the slider still works, and a line says the ambient sensor may move it again.
 - **The cost.** The value is read at 1 Hz, and only while the Backlight tab or the popover's Tools section is on screen. It goes through the same `SamplingDemand` as the metric samplers, so it stops with the view.
 
+## Efficiency
+
+Vent is a monitor: it is running all day, and the one thing it must never be is the reason the fan comes on.
+The budgets below are for the **Release** build on an M1 Pro, measured over a minute with `top`, and `scripts/measure_idle.sh` prints the table.
+
+| State | Budget | This Mac | On wall power, out of Low Power Mode | Before this work |
+|---|---|---|---|---|
+| Closed - menu bar label only | < 0.5 % CPU | 0.09 % | 0.34 % | 0.79 % |
+| Closed - "icon only", or the item parked behind the notch | about nothing | 0.00 % | 0.00 % | 0.79 % |
+| Popover open on Dashboard | < 2 % | 1.56 % | 2.43 % | 2.82 % |
+| Popover open on Tools | < 2 % | 0.17 % | 0.49 % | 1.34 % |
+| Window open on Overview | < 3 % | 0.72 % | 2.12 % | 2.85 % |
+| Window open on Processes | < 4 % | 3.50 % | 3.67 % | 4.33 % |
+| Window open on Windows (and Keep Awake, Backlight, Settings) | about the closed baseline | 0.09 % | 0.35 % | 0.89 % |
+
+The middle column is the Mac this was measured on, which has Low Power Mode on; the next one is the same build with `--power-rules off`, which is what a Mac on wall power with Low Power Mode off does.
+The last column is the build before this work, which had no icon-only rule at all: it sampled for a label nobody could see, so its second row is its first row.
+The open Dashboard is the one state that is over its budget there, and the profiler says what is left is SwiftUI laying the panel out again on every pass, not sampling.
+
+Idle wakeups in the closed state: **0.04 per second** (the budget was under 15).
+Memory: 15 MB closed, 30 MB with the popover open, 45-67 MB with the window open.
+
+### Where the cost went
+
+- **Nothing on screen means nothing sampled.** With "Show in menu bar: icon only", with no metric ticked, or with a status item the menu bar has no room for - the notch case - the sampler does not run at all. It is not a slower loop, it is no loop.
+- **Tolerance on every periodic sleep.** Each `Task.sleep` and each `Timer` carries a fifth of its interval as slack, so the kernel can put the wakeup next to one it was making anyway.
+- **The sampling is off the main actor** at `.utility`, on a detached task; only the apply step comes back to the main actor.
+- **The menu bar label is drawn straight into a bitmap** (`MenuBarLabelImage`) rather than through `ImageRenderer`: 0.45 ms instead of 1.67 ms, on every pass, for ever. A small LRU keeps the images of the values that come back. The image is the same pixels to the eye at 1x and 2x; `--label-bench` renders both and prints the difference.
+- **One observable property per domain.** A CPU-only pass invalidates the CPU card and nothing else, and a value that did not change is not written at all.
+- **The process table is filtered and sorted once per sample**, not inside `body`, and the popover reads it every 5 s where its own tab reads it every 3.
+- **The sparkline is one `Canvas` and one `Path`**, not a `Chart` with a `LineMark` per sample: 300 marks was the most expensive thing on screen.
+- **Temperatures are read at most every 3 s**, and the popover asks for the CPU and GPU dies rather than every labelled sensor. Every sensor is a driver round trip, and a die does not move in a second. The Sensors and Fans tabs are exempt: their charts want every point.
+- **Slower on battery** (x2 with nothing on screen), **in Low Power Mode** (x2 on wall power, x4 on battery) and at a serious thermal state (never faster than 5 s), capped at 10 s. Every input is a push notification; nothing polls for it.
+- **App Nap stays on.** There is no `beginActivity` anywhere in the app, the helper or the CLI.
+
+### Re-measuring
+
+```sh
+make install CONFIG=Release
+scripts/measure_idle.sh build/measure/final.txt
+```
+
+It launches one extra instance of the installed bundle per state in the background, never takes the front, and only ever kills the pid it started itself: the pid that appeared between two `pgrep` calls around the launch, and only after its command line is checked for that run's tag.
+Your own Vent keeps running beside it.
+
+Two states cannot be arranged from outside and have a debug argument for that reason.
+`--menu-bar-label on|off` decides whether the label is drawing numbers, because whether the menu bar has room for one more item depends on what else is in it at that second.
+`--popover-offscreen` hosts the popover's own view tree in a borderless window one point on screen at the bottom-left corner, because a real `NSPopover` never appears for an app that is not active; it is the same view, the same observation and the same sampling demand, and the one point on screen is what stops AppKit throttling the drawing.
+
 ## Launch at login
 
 **Settings > Startup > Launch at login** registers the app with `SMAppService.mainApp`.
@@ -524,6 +573,10 @@ open -a Vent --args --show-window --tab sensors
   --fan-mode 0=constant:3000   what a fake fan should do; also curve:Tp01:45:85 and auto
   --window-size 760x480        exact content size, for a shot at the minimum the layout allows
   --no-activate                never take the front: the window is ordered in behind everything
+  --window-front               order the window on top without activating (measurement only)
+  --popover-offscreen          the popover's view and sampling demand, off the corner of the screen
+  --menu-bar-label on|off      pretend the status item label is drawing numbers, or is not
+  --label-bench <dir>          time both label renders and write the pixel difference between them
   --capture <dir>              write PNGs and a status file after --capture-delay seconds
   --appearance dark|light      force one appearance
   --capture-quit               quit when the capture is done

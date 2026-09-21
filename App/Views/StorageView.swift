@@ -513,14 +513,16 @@ private struct FolderBar: View {
 final class FileIconCache {
     static let shared = FileIconCache()
 
-    private var icons: [String: NSImage] = [:]
+    /// Bounded, for the same reason as the process icons: a scan of a full
+    /// disk meets more file extensions than anybody wants to keep images for.
+    private var icons = LRUCache<String, NSImage>(capacity: 128)
 
     func icon(forPath path: String) -> NSImage {
         let suffix = (path as NSString).pathExtension.lowercased()
-        if let cached = icons[suffix] { return cached }
+        if let cached = icons.value(forKey: suffix) { return cached }
         let type = suffix.isEmpty ? nil : UTType(filenameExtension: suffix)
         let icon = NSWorkspace.shared.icon(for: type ?? .data)
-        icons[suffix] = icon
+        icons.insert(icon, forKey: suffix)
         return icon
     }
 }

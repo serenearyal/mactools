@@ -72,9 +72,9 @@ actor ProcessFeed {
 @MainActor
 @Observable
 final class ProcessStore {
-    private(set) var rows: [ProcessTableRow] = []
-    /// Rows with no readable counters. They are the reason for the helper.
-    private(set) var restrictedCount = 0
+    /// The rows, filtered, sorted and topped once per sample. Never inside a
+    /// `body`: see `ProcessRows`.
+    private(set) var derived = ProcessRows()
     private(set) var helperRowCount = 0
     private(set) var helperFailure: String?
     /// The result of the last action, for the footer.
@@ -82,10 +82,41 @@ final class ProcessStore {
     /// Passes since launch, for the capture path. See `MetricsStore`.
     private(set) var sampleCount = 0
 
-    var searchText = ""
-    var scope: ProcessFilterScope = .all
-    var sortOrder = [ProcessComparator(key: .cpu, order: .reverse)]
     var selection: Set<ProcessTableRow.ID> = []
+
+    /// The three things the user can change about the table. Each one derives
+    /// the rows again on the spot, so the change is one pass over the sample
+    /// rather than one per layout.
+    var searchText: String {
+        get { query }
+        set {
+            guard query != newValue else { return }
+            query = newValue
+            derive()
+        }
+    }
+
+    var scope: ProcessFilterScope {
+        get { filterScope }
+        set {
+            guard filterScope != newValue else { return }
+            filterScope = newValue
+            derive()
+        }
+    }
+
+    var sortOrder: [ProcessComparator] {
+        get { order }
+        set {
+            guard order != newValue else { return }
+            order = newValue
+            derive()
+        }
+    }
+
+    private var query = ""
+    private var filterScope: ProcessFilterScope = .all
+    private var order = [ProcessComparator(key: .cpu, order: .reverse)]
 
     @ObservationIgnored private let feed = ProcessFeed()
     @ObservationIgnored private let names = UserNameCache.shared
@@ -95,31 +126,19 @@ final class ProcessStore {
     /// The uid of this process. Its rows can be signalled without the helper.
     static let currentUID = getuid()
 
-    /// Activity Monitor's own default, and slow enough that one libproc pass
-    /// over 580 processes stays under a percent of a core.
-    private static let interval = SamplingPlan.processInterval
 
     // MARK: - What the table shows
 
-    var visibleRows: [ProcessTableRow] {
-        ProcessTable
-            .filter(rows, scope: scope, currentUID: ProcessStore.currentUID, query: searchText)
-            .sorted(using: sortOrder)
-    }
+    var rows: [ProcessTableRow] { derived.all }
+    var visibleRows: [ProcessTableRow] { derived.visible }
+    var topByCPU: [ProcessTableRow] { derived.topByCPU }
+    var topByMemory: [ProcessTableRow] { derived.topByMemory }
+    var restrictedCount: Int { derived.restrictedCount }
+    var totalCPUPercent: Double { derived.totalCPUPercent }
 
     var selectedRows: [ProcessTableRow] {
-        rows.filter { selection.contains($0.id) }
+        derived.all.filter { selection.contains($0.id) }
     }
-
-    var topByCPU: [ProcessTableRow] {
-        ProcessTable.sorted(rows, by: .cpu, ascending: false)
-    }
-
-    var topByMemory: [ProcessTableRow] {
-        ProcessTable.sorted(rows, by: .memory, ascending: false)
-    }
-
-    var totalCPUPercent: Double { ProcessTable.totalCPUPercent(rows) }
 
     var helperIsAnswering: Bool { helperRowCount > 0 }
 
@@ -128,7 +147,7 @@ final class ProcessStore {
     /// Two passes, not one: the first pass has no CPU baseline to subtract, so
     /// its whole CPU column is nil and a report made from it would say nothing
     /// about load at all.
-    var hasReportableSample: Bool { sampleCount >= 2 && !rows.isEmpty }
+    var hasReportableSample: Bool { sampleCount >= 2 && !derived.all.isEmpty }
 
     // MARK: - Cadence
 
@@ -148,13 +167,15 @@ final class ProcessStore {
     private func updateSampling() {
         let wanted = SamplingPlan.samplesProcesses(demand)
         if wanted, task == nil {
-            task = Task { @MainActor [weak self] in
+            // `.utility`, and the libproc pass itself runs on the feed actor:
+            // the main actor only ever sees the finished sample.
+            let feed = feed
+            task = Task.detached(priority: .utility) { [weak self] in
                 while !Task.isCancelled {
-                    guard let self else { return }
                     let sample = await feed.sample()
-                    guard !Task.isCancelled else { return }
-                    apply(sample)
-                    try? await Task.sleep(for: ProcessStore.interval)
+                    guard !Task.isCancelled, let self else { return }
+                    let interval = await self.applyAndWait(sample)
+                    try? await Task.sleep(for: interval, tolerance: SamplingPlan.tolerance(for: interval))
                 }
             }
         } else if !wanted, task != nil {
@@ -163,10 +184,35 @@ final class ProcessStore {
         }
     }
 
+    /// The main-actor half of one pass: publish it, and say how long the loop
+    /// sleeps before the next one. The tab is worth three seconds, the three
+    /// rows in the popover are not.
+    private func applyAndWait(_ sample: ProcessFeed.Sample) -> Duration {
+        apply(sample)
+        return SamplingPlan.processInterval(demand)
+    }
+
+    /// Derives the rows from what is already sampled. The filter, the search
+    /// box and the column header land here.
+    private func derive() {
+        derived = ProcessRows.make(
+            rows: derived.all,
+            scope: filterScope,
+            currentUID: ProcessStore.currentUID,
+            query: query,
+            sortOrder: order
+        )
+    }
+
     private func apply(_ sample: ProcessFeed.Sample) {
         sampleCount += 1
-        rows = sample.rows.map { ProcessTableRow(info: $0, userName: names.name(for: $0.uid)) }
-        restrictedCount = ProcessTable.restrictedCount(rows)
+        derived = ProcessRows.make(
+            rows: sample.rows.map { ProcessTableRow(info: $0, userName: names.name(for: $0.uid)) },
+            scope: filterScope,
+            currentUID: ProcessStore.currentUID,
+            query: query,
+            sortOrder: order
+        )
         helperRowCount = sample.helperRows
         // Only the transitions, so a helper that is not installed does not
         // write a line every three seconds.
@@ -180,8 +226,9 @@ final class ProcessStore {
         helperFailure = sample.helperFailure
         // A process that ended keeps no place in the selection, so the next
         // Quit cannot land on a pid the kernel has handed to somebody else.
-        let live = Set(rows.map(\.id))
-        selection = selection.filter { live.contains($0) }
+        let live = Set(derived.all.map(\.id))
+        let kept = selection.filter { live.contains($0) }
+        if kept != selection { selection = kept }
     }
 
     /// One sample pair for a copy from the popover or the status item menu.

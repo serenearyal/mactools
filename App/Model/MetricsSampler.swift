@@ -96,6 +96,8 @@ actor MetricsSampler {
             []
         case .cpu:
             SensorNaming.knownTemperatureKeys(in: [.cpuPerformance, .cpuEfficiency])
+        case .cpuGPU:
+            SensorNaming.knownTemperatureKeys(in: [.cpuPerformance, .cpuEfficiency, .gpu])
         case .labelled:
             SensorNaming.knownTemperatureKeys()
         case .everything:

@@ -38,10 +38,6 @@ final class KeepAwakeController {
     /// reads this, so the minute that passes is what invalidates the view.
     private var tick = 0
 
-    /// The countdown moves once a minute, so twice a minute is enough to keep
-    /// it honest, and the tolerance lets the wakeup ride with one the system
-    /// already has.
-    private static let countdownInterval: TimeInterval = 30
     /// The assertion list, while its tab is on screen.
     private static let listInterval: TimeInterval = 5
 
@@ -235,21 +231,24 @@ final class KeepAwakeController {
         expiryTimer = timer
     }
 
+    /// Redraws the badge when its text is about to change, and not before.
+    ///
+    /// The text is "42m", so it changes once a minute: the timer aims at the
+    /// next minute boundary instead of ticking thirty times for nothing, and
+    /// in the last minute, where the text is the fixed "under 1m", it is a
+    /// slow heartbeat against clock drift. `SamplingPlan.badgeTick` holds the
+    /// rule, and the tests hold the rule to it.
     private func updateCountdown() {
-        let wanted = state.isOn && state.expiry != nil
-        if wanted, countdownTimer == nil {
-            let timer = Timer.scheduledTimer(
-                withTimeInterval: KeepAwakeController.countdownInterval,
-                repeats: true
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.tick &+= 1 }
-            }
-            timer.tolerance = KeepAwakeController.countdownInterval / 3
-            countdownTimer = timer
-        } else if !wanted, countdownTimer != nil {
-            countdownTimer?.invalidate()
-            countdownTimer = nil
-        }
+        countdownTimer?.invalidate()
+        countdownTimer = nil
         tick &+= 1
+        guard state.isOn, let expiry = state.expiry else { return }
+        let remaining = Int(expiry.timeIntervalSinceNow.rounded())
+        let interval = Double(SamplingPlan.badgeTick(remainingSeconds: remaining).components.seconds)
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateCountdown() }
+        }
+        timer.tolerance = interval / 5
+        countdownTimer = timer
     }
 }

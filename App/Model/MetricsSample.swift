@@ -10,6 +10,10 @@ enum TemperatureScope: Sendable, Equatable, Comparable {
     case none
     /// The CPU dies only: what the menu bar needs for "hottest CPU sensor".
     case cpu
+    /// The CPU dies and the GPU: what the popover draws, and about a third of
+    /// the keys of the labelled set. Every SMC read is a driver round trip, so
+    /// the difference is the most expensive thing about an open popover.
+    case cpuGPU
     /// Every labelled sensor.
     case labelled
     /// Every `flt ` key with a "T" prefix, which needs the catalog.

@@ -13,12 +13,18 @@ final class StatusItemController: NSObject {
     private let popoverController: MenuBarPopoverController
     private let tipController: MenuBarTipController
 
-    private var lastCells: [MenuBarCell] = []
-    private var lastStyle: MenuBarLabelStyle?
-    private var lastIcon: Bool?
-    private var lastAwake: Bool?
-    private var lastScale: CGFloat = 0
+    private var lastKey: MenuBarLabelKey?
+    /// The rendered labels, newest first. Small on purpose: the label of a Mac
+    /// that is working changes every second, so this is only ever a hit on the
+    /// values that repeat - a placeholder, a temperature that sits still, the
+    /// idle percentage at night - and an unbounded cache of images for values
+    /// that never come back would be a leak with a nice name.
+    private var images = LRUCache<MenuBarLabelKey, NSImage>(capacity: 24)
     private var screenObserver: NSObjectProtocol?
+    private var moveObserver: NSObjectProtocol?
+    /// What `isLabelOnScreen` last answered, so a move that changes nothing
+    /// does not republish the demand.
+    private var wasLabelOnScreen = true
 
     /// The size of the label the status item is showing, for the debug
     /// capture path: the menu bar of a notched Mac has little room.
@@ -38,6 +44,19 @@ final class StatusItemController: NSObject {
     var isItemOnScreen: Bool {
         guard statusItem.isVisible, let window = statusItem.button?.window, window.frame.width > 0
         else { return false }
+        return NSScreen.screens.contains { $0.frame.intersects(window.frame) }
+    }
+
+    /// Whether anything the label draws can be seen at all.
+    ///
+    /// The same question as `isItemOnScreen`, answered carefully the other way
+    /// round: the tip may not point at an item it cannot find, and the
+    /// samplers may not stop unless the item is certainly not there. A button
+    /// window that does not exist yet - the first turn of the run loop after
+    /// launch - counts as on screen, so the app never starts up blind.
+    var isLabelOnScreen: Bool {
+        guard statusItem.isVisible else { return false }
+        guard let window = statusItem.button?.window, window.frame.width > 0 else { return true }
         return NSScreen.screens.contains { $0.frame.intersects(window.frame) }
     }
 
@@ -89,7 +108,31 @@ final class StatusItemController: NSObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh(force: true) }
+            MainActor.assumeIsolated {
+                self?.refresh(force: true)
+                self?.publishLabelVisibility()
+            }
+        }
+        // The status item moves when the menu bar gains or loses an item, and
+        // on a notched Mac that is how it ends up off the screen. There is no
+        // notification for "your item is hidden now", but the window it lives
+        // in does post its own move.
+        moveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            // The identity alone crosses into the isolated block: a
+            // `Notification` is not `Sendable`, and an `ObjectIdentifier` is
+            // all the comparison needs.
+            let moved = (notification.object as? NSObject).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated {
+                guard let self,
+                      let window = self.statusItem.button?.window,
+                      moved == ObjectIdentifier(window)
+                else { return }
+                self.publishLabelVisibility()
+            }
         }
 
         track()
@@ -98,10 +141,14 @@ final class StatusItemController: NSObject {
     // MARK: - Rendering
 
     /// Re-runs whenever a value the label shows changes, and never otherwise.
+    ///
+    /// The snapshot it reads is narrowed to the metrics the label draws, so a
+    /// pass that only moved the disk throughput does not wake a label that
+    /// shows the CPU and the temperature.
     private func track() {
         let state = withObservationTracking {
             (
-                MenuBarLabel.cells(snapshot: store.snapshot, settings: settings),
+                MenuBarLabel.cells(snapshot: labelSnapshot, settings: settings),
                 settings.labelStyle,
                 settings.showMenuBarIcon,
                 AppServices.shared.keepAwake.isOn
@@ -112,9 +159,19 @@ final class StatusItemController: NSObject {
         render(cells: state.0, style: state.1, icon: state.2, awake: state.3, force: false)
     }
 
+    /// Only the domains the label draws.
+    private var labelSnapshot: MetricsSnapshot {
+        store.snapshot(
+            for: SamplingPlan.menuBarRequest(
+                metrics: settings.menuBarMetrics,
+                chosenSensorScope: .labelled
+            )
+        )
+    }
+
     private func refresh(force: Bool) {
         render(
-            cells: MenuBarLabel.cells(snapshot: store.snapshot, settings: settings),
+            cells: MenuBarLabel.cells(snapshot: labelSnapshot, settings: settings),
             style: settings.labelStyle,
             icon: settings.showMenuBarIcon,
             awake: AppServices.shared.keepAwake.isOn,
@@ -122,9 +179,14 @@ final class StatusItemController: NSObject {
         )
     }
 
-    /// The expensive part is `ImageRenderer`, so it only runs when a string,
-    /// the style, the icon setting, the Keep Awake state or the screen scale
-    /// changed.
+    /// Draws the label, and only when something it shows really changed.
+    ///
+    /// Two gates in front of the drawing: the key of what is on screen, which
+    /// catches a pass that changed no string at all, and a small LRU of the
+    /// images already drawn, which catches a value that comes back. What is
+    /// left is drawn straight into a bitmap by `MenuBarLabelImage`;
+    /// `ImageRenderer` used to do it and cost about thirty times as much,
+    /// once a second, for ever.
     private func render(
         cells: [MenuBarCell],
         style: MenuBarLabelStyle,
@@ -135,28 +197,38 @@ final class StatusItemController: NSObject {
         let scale = statusItem.button?.window?.backingScaleFactor
             ?? NSScreen.main?.backingScaleFactor
             ?? 2
-        let unchanged = cells == lastCells
-            && style == lastStyle
-            && icon == lastIcon
-            && awake == lastAwake
-            && scale == lastScale
-        guard force || !unchanged else { return }
-        lastCells = cells
-        lastStyle = style
-        lastIcon = icon
-        lastAwake = awake
-        lastScale = scale
+        let key = MenuBarLabelKey(cells: cells, style: style, icon: icon, awake: awake, scale: scale)
+        guard force || key != lastKey else { return }
+        lastKey = key
 
-        let renderer = ImageRenderer(
-            content: MenuBarLabelView(cells: cells, style: style, showIcon: icon, awake: awake)
-        )
-        renderer.scale = scale
-        guard let image = renderer.nsImage else { return }
-        image.isTemplate = true
+        let image: NSImage
+        if let cached = images.value(forKey: key) {
+            image = cached
+        } else {
+            guard let drawn = MenuBarLabelImage.image(
+                cells: cells,
+                style: style,
+                showIcon: icon,
+                awake: awake,
+                scale: scale
+            ) else { return }
+            images.insert(drawn, forKey: key)
+            image = drawn
+        }
         lastImageSize = image.size
         statusItem.button?.image = image
         // A new image clears the pressed look, and the popover is still there.
         if popoverController.isShown { statusItem.button?.highlight(true) }
+    }
+
+    /// Tells the services whether the label can be seen, which is what decides
+    /// if the app samples anything at all with nothing else on screen.
+    private func publishLabelVisibility() {
+        let onScreen = isLabelOnScreen
+        guard onScreen != wasLabelOnScreen else { return }
+        wasLabelOnScreen = onScreen
+        AppLog.app.notice("status item on screen: \(onScreen, privacy: .public)")
+        AppServices.shared.refreshDemand()
     }
 
     /// `--no-activate`, for a capture run: the popover appears without taking
@@ -195,6 +267,12 @@ final class StatusItemController: NSObject {
 
     func closePopover() {
         popoverController.close()
+    }
+
+    /// `--popover-offscreen`: the popover's view tree and its sampling demand,
+    /// without the activation a real popover needs. See the controller.
+    func showOffscreenPopover() {
+        popoverController.showOffscreen()
     }
 
     // MARK: - Clicks

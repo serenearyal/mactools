@@ -14,19 +14,21 @@ struct PopoverDashboard: View {
     let open: (MainTab) -> Void
 
     private var store: MetricsStore { services.store }
-    private var snapshot: MetricsSnapshot { services.store.snapshot }
 
+    /// Each section takes the store and reads its own domain out of it, so a
+    /// pass that only moved the CPU redraws the CPU section alone. Reading a
+    /// whole snapshot here would make every section depend on every number.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             section { CPUSection(store: store, open: open) }
             Divider()
-            section { MemorySection(memory: snapshot.memory, open: open) }
+            section { MemorySection(store: store, open: open) }
             Divider()
-            section { StorageSection(snapshot: snapshot, open: open) }
+            section { StorageSection(store: store, open: open) }
             Divider()
             section {
                 ThermalSection(
-                    snapshot: snapshot,
+                    store: store,
                     fans: services.fans,
                     helper: services.helper,
                     settings: services.settings,
@@ -55,7 +57,7 @@ private struct CPUSection: View {
     let store: MetricsStore
     let open: (MainTab) -> Void
 
-    private var cpu: CPUSample? { store.snapshot.cpu }
+    private var cpu: CPUSample? { store.cpu }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PopoverLayout.rowSpacing) {
@@ -136,8 +138,10 @@ private struct CoreBar: View {
 // MARK: - Memory
 
 private struct MemorySection: View {
-    let memory: MemorySnapshot?
+    let store: MetricsStore
     let open: (MainTab) -> Void
+
+    private var memory: MemorySnapshot? { store.memory }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PopoverLayout.rowSpacing) {
@@ -197,10 +201,10 @@ private struct MemorySection: View {
 // MARK: - Storage
 
 private struct StorageSection: View {
-    let snapshot: MetricsSnapshot
+    let store: MetricsStore
     let open: (MainTab) -> Void
 
-    private var volume: VolumeInfo? { snapshot.bootVolume }
+    private var volume: VolumeInfo? { store.bootVolume }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PopoverLayout.rowSpacing) {
@@ -234,13 +238,13 @@ private struct StorageSection: View {
                     .monospacedDigit()
                 Spacer(minLength: PopoverLayout.rowSpacing)
                 Label(
-                    Fmt.throughput(snapshot.diskIO?.bytesReadPerSecond ?? 0),
+                    Fmt.throughput(store.diskIO?.bytesReadPerSecond ?? 0),
                     systemImage: "arrow.down"
                 )
                 .monospacedDigit()
                 .frame(width: 96, alignment: .trailing)
                 Label(
-                    Fmt.throughput(snapshot.diskIO?.bytesWrittenPerSecond ?? 0),
+                    Fmt.throughput(store.diskIO?.bytesWrittenPerSecond ?? 0),
                     systemImage: "arrow.up"
                 )
                 .monospacedDigit()
@@ -266,7 +270,7 @@ private struct StorageSection: View {
 // MARK: - Thermals and fans
 
 private struct ThermalSection: View {
-    let snapshot: MetricsSnapshot
+    let store: MetricsStore
     let fans: FanStore
     let helper: HelperController
     let settings: AppSettings
@@ -300,17 +304,17 @@ private struct ThermalSection: View {
         HStack(alignment: .top, spacing: PopoverLayout.rowSpacing) {
             PopoverStat(
                 caption: "CPU",
-                value: temperature(snapshot.hottestCPU),
-                tint: snapshot.hottestCPU.map { MetricColor.temperature($0.celsius) }
+                value: temperature(store.hottestCPU),
+                tint: store.hottestCPU.map { MetricColor.temperature($0.celsius) }
             )
             PopoverStat(
                 caption: "GPU",
-                value: temperature(snapshot.hottest(in: .gpu)),
-                tint: snapshot.hottest(in: .gpu).map { MetricColor.temperature($0.celsius) }
+                value: temperature(store.hottest(in: .gpu)),
+                tint: store.hottest(in: .gpu).map { MetricColor.temperature($0.celsius) }
             )
             PopoverStat(
                 caption: "POWER",
-                value: snapshot.systemPower.map { Fmt.watts($0.watts) } ?? "--"
+                value: store.systemPower.map { Fmt.watts($0.watts) } ?? "--"
             )
         }
 
@@ -366,7 +370,7 @@ private struct ThermalSection: View {
     /// The helper knows the mode the user asked for; without it the SMC read
     /// still gives the speed, and the mode is what the firmware reports.
     private var fanRows: [FanRow] {
-        FanRow.rows(fans: fans, snapshot: snapshot)
+        FanRow.rows(fans: fans, smcFans: store.fans)
     }
 }
 
@@ -386,7 +390,7 @@ struct FanRow {
     }
 
     @MainActor
-    static func rows(fans: FanStore, snapshot: MetricsSnapshot) -> [FanRow] {
+    static func rows(fans: FanStore, smcFans: [FanReading]) -> [FanRow] {
         if fans.isAvailable, !fans.fans.isEmpty {
             return fans.fans.map { fan in
                 FanRow(
@@ -397,7 +401,7 @@ struct FanRow {
                 )
             }
         }
-        return snapshot.fans.map { fan in
+        return smcFans.map { fan in
             FanRow(
                 index: fan.index,
                 name: "Fan \(fan.index + 1)",

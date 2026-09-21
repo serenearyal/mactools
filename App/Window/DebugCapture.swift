@@ -104,6 +104,129 @@ enum DebugCapture {
         }
     }
 
+    /// `--label-bench <directory>`: how long one status item label costs.
+    ///
+    /// The label is the only thing an idle Vent draws, so the question "is
+    /// `ImageRenderer` worth replacing" is answered here rather than guessed.
+    /// Every render uses a different value, which is what the menu bar really
+    /// does once a second, so no cache can flatter the number.
+    static func benchmarkLabel(directory: String, services: AppServices) {
+        let base = URL(filePath: directory, directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let style = services.settings.labelStyle
+        let count = 60
+        let samples = (0..<count).map { index in
+            [
+                MenuBarCell(metric: .cpuUsage, caption: "CPU", value: "\(10 + index % 80)%", widest: "100%"),
+                MenuBarCell(
+                    metric: .cpuTemperature,
+                    caption: "CPU",
+                    value: "\(40 + index % 50)°",
+                    widest: "100°"
+                ),
+            ]
+        }
+
+        var rendererSeconds = 0.0
+        for cells in samples {
+            let start = Date.now
+            let renderer = ImageRenderer(
+                content: MenuBarLabelView(cells: cells, style: style, showIcon: true, awake: false)
+            )
+            renderer.scale = 2
+            _ = renderer.nsImage
+            rendererSeconds += Date.now.timeIntervalSince(start)
+        }
+
+        var directSeconds = 0.0
+        for cells in samples {
+            let start = Date.now
+            _ = MenuBarLabelImage.image(cells: cells, style: style, showIcon: true, awake: false, scale: 2)
+            directSeconds += Date.now.timeIntervalSince(start)
+        }
+
+        // The two renders of the same label at both scales, so the look can be
+        // compared pixel for pixel instead of by eye. The appearance is not a
+        // variant: the label is a template image, and the system tints the one
+        // image for the light and the dark menu bar.
+        let cells = samples[0]
+        var differences: [String] = []
+        for scale in [CGFloat(1), CGFloat(2)] {
+            let rendered = renderedImage(cells: cells, style: style, scale: scale)
+            let drawn = MenuBarLabelImage.image(
+                cells: cells,
+                style: style,
+                showIcon: true,
+                awake: false,
+                scale: scale
+            )
+            for (name, image) in [("imagerenderer", rendered), ("direct", drawn)] {
+                guard let image, let tiff = image.tiffRepresentation,
+                      let rep = NSBitmapImageRep(data: tiff)
+                else { continue }
+                write(rep, to: base.appending(path: "bench-\(name)-\(Int(scale))x.png"))
+            }
+            differences.append("at \(Int(scale))x: \(difference(rendered, drawn))")
+        }
+
+        let lines = [
+            "renders: \(count)",
+            "style: \(style.rawValue)",
+            String(format: "ImageRenderer: %.3f ms per render", rendererSeconds / Double(count) * 1000),
+            String(format: "direct draw:   %.3f ms per render", directSeconds / Double(count) * 1000),
+            "ImageRenderer size: \(renderedImage(cells: cells, style: style, scale: 2)?.size ?? .zero)",
+            "direct draw size:   \(MenuBarLabelImage.image(cells: cells, style: style, showIcon: true, awake: false, scale: 2)?.size ?? .zero)",
+        ] + differences
+        try? lines.joined(separator: "\n")
+            .write(to: base.appending(path: "label-bench.txt"), atomically: true, encoding: .utf8)
+    }
+
+    /// How far the two renders of the same label are apart: the share of
+    /// pixels whose alpha differs at all, and the worst difference of the lot.
+    /// The label is a template image, so alpha is the whole picture.
+    private static func difference(_ lhs: NSImage?, _ rhs: NSImage?) -> String {
+        guard let lhs, let rhs,
+              let left = bitmap(of: lhs), let right = bitmap(of: rhs)
+        else { return "not comparable" }
+        guard left.pixelsWide == right.pixelsWide, left.pixelsHigh == right.pixelsHigh else {
+            return "different sizes: \(left.pixelsWide)x\(left.pixelsHigh) vs \(right.pixelsWide)x\(right.pixelsHigh)"
+        }
+        var differing = 0
+        var worst = 0
+        var total = 0
+        for y in 0..<left.pixelsHigh {
+            for x in 0..<left.pixelsWide {
+                guard let a = left.colorAt(x: x, y: y), let b = right.colorAt(x: x, y: y) else {
+                    continue
+                }
+                total += 1
+                let delta = Int((abs(a.alphaComponent - b.alphaComponent) * 255).rounded())
+                if delta > 8 { differing += 1 }
+                worst = max(worst, delta)
+            }
+        }
+        let share = total == 0 ? 0 : Double(differing) / Double(total) * 100
+        return String(format: "%.1f %% of pixels differ by more than 8/255, worst %d/255", share, worst)
+    }
+
+    private static func bitmap(of image: NSImage) -> NSBitmapImageRep? {
+        if let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first {
+            return rep
+        }
+        guard let tiff = image.tiffRepresentation else { return nil }
+        return NSBitmapImageRep(data: tiff)
+    }
+
+    private static func renderedImage(
+        cells: [MenuBarCell],
+        style: MenuBarLabelStyle,
+        scale: CGFloat
+    ) -> NSImage? {
+        let renderer = ImageRenderer(content: MenuBarLabelView(cells: cells, style: style))
+        renderer.scale = scale
+        return renderer.nsImage
+    }
+
     private static func value(of name: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else {
             return nil
@@ -255,6 +378,8 @@ enum DebugCapture {
             "menu bar tip window number: \(services.statusItemController?.tipWindowNumber ?? 0)",
             "menu bar tip seen: \(services.settings.menuBarTipShown)",
             "status item on screen: \(services.statusItemController?.isItemOnScreen ?? false)",
+            "status item label on screen: \(services.statusItemController?.isLabelOnScreen ?? false)",
+            "menu bar label samples: \(services.demand.menuBarShowsMetrics)",
             "show dock icon: \(services.settings.showDockIcon)",
             // What the stores were last asked for, and by whom.
             "sampling demand: \(services.demand.summary)",

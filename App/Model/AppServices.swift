@@ -38,6 +38,10 @@ final class AppServices {
     /// False under `--popover-section`: a capture run shows a section without
     /// rewriting the one the user chose.
     @ObservationIgnored private var persistsPopoverSection = true
+    /// `--menu-bar-label on|off`. See `overrideLabelVisibility`.
+    @ObservationIgnored private var labelOverride: Bool?
+    /// `--power-rules off`. See `overridePowerRules`.
+    @ObservationIgnored private var powerRules = true
     /// What the stores were last told, for the status file of a capture run.
     @ObservationIgnored private(set) var demand = SamplingDemand()
 
@@ -95,13 +99,100 @@ final class AppServices {
         publishDemand()
     }
 
+    /// The menu bar label is the one consumer that is always there, so what it
+    /// draws decides whether an app with nothing on screen samples at all.
+    ///
+    /// Three ways it draws nothing: "Show in menu bar: icon only", an empty
+    /// metric list, and a status item the menu bar has no room for - on a
+    /// notched Mac the system parks the item off the edge of the screen, where
+    /// every number it draws is for nobody.
+    private var labelShowsMetrics: Bool {
+        if let labelOverride { return labelOverride }
+        guard settings.menuBarContent == .metrics, !settings.menuBarMetrics.isEmpty else {
+            return false
+        }
+        return statusItemController?.isLabelOnScreen ?? true
+    }
+
+    /// `--menu-bar-label on|off`, for `scripts/measure_idle.sh` alone.
+    ///
+    /// The measurement needs both states on purpose, and neither of them can
+    /// be arranged from outside: whether the menu bar has room for one more
+    /// item depends on what else is in it at that second.
+    func overrideLabelVisibility(_ shows: Bool) {
+        labelOverride = shows
+        publishDemand()
+    }
+
+    /// The status item moved, or the screens changed: the label may have gone
+    /// behind the notch, or come back.
+    func refreshDemand() {
+        publishDemand()
+    }
+
+    /// The settings that decide what the label draws, and the power readings
+    /// that decide how often anything is sampled. Both are push only.
+    func startObservingEnvironment() {
+        trackLabelSettings()
+        trackPowerConditions()
+        publishDemand()
+    }
+
+    private func trackLabelSettings() {
+        withObservationTracking {
+            _ = settings.menuBarContent
+            _ = settings.menuBarMetrics
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                trackLabelSettings()
+                publishDemand()
+            }
+        }
+    }
+
+    /// One subscription for the whole app: `KeepAwakeController` owns the
+    /// `IOPSNotificationCreateRunLoopSource` and the two notifications, and the
+    /// cadence rules read the value it publishes.
+    private func trackPowerConditions() {
+        let status = withObservationTracking {
+            keepAwake.power
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                trackPowerConditions()
+            }
+        }
+        store.setPowerConditions(
+            powerRules
+                ? PowerConditions(
+                    onBattery: status.onBattery,
+                    lowPowerMode: status.lowPowerMode,
+                    thermalState: status.thermal
+                )
+                : PowerConditions()
+        )
+    }
+
+    /// `--power-rules off`, for `scripts/measure_idle.sh` alone: the cadence
+    /// this Mac would use on wall power, out of Low Power Mode and cool.
+    ///
+    /// Without it a measurement taken on a laptop in Low Power Mode would
+    /// claim a budget that only holds in Low Power Mode.
+    func overridePowerRules(_ enabled: Bool) {
+        powerRules = enabled
+        trackPowerConditions()
+    }
+
     private func publishDemand() {
         let demand = SamplingDemand(
             consumers: consumers,
             activeTab: tab,
             popoverSection: section,
-            windowOccluded: windowOccluded
+            windowOccluded: windowOccluded,
+            menuBarShowsMetrics: labelShowsMetrics
         )
+        guard demand != self.demand else { return }
         self.demand = demand
         // Memory only, at `info` level: the line is how a sampling leak is
         // proved afterwards, and it is of no interest otherwise.

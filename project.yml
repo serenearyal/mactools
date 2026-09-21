@@ -187,6 +187,11 @@ targets:
       # itself stays out: an `@Observable` class in this bundle makes the
       # linker pull SwiftUICore, which a unit-test bundle may not link.
       - App/Model/SamplingPlan.swift
+      # The rows the Processes tab draws, derived once per sample instead of
+      # inside `body`, and the bounded cache behind the menu bar label. Both
+      # are plain values, for the same linker reason as everything here.
+      - App/Model/ProcessRows.swift
+      - App/Model/LRUCache.swift
       - App/Model/MainTab.swift
       - App/Model/PopoverSection.swift
       - App/Model/MetricsSample.swift

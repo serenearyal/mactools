@@ -14,6 +14,9 @@ struct PowerStatus: Equatable, Sendable {
     var percent: Int?
     /// False on a desk Mac and on a laptop that is plugged in.
     var onBattery = false
+    /// The user asked the system for battery life over everything else. Vent
+    /// takes them at their word and samples four times slower.
+    var lowPowerMode = false
     var thermal: ProcessInfo.ThermalState = .nominal
 
     /// A Mac with no battery can never trip the charge guard.
@@ -26,7 +29,10 @@ struct PowerStatus: Equatable, Sendable {
 /// anywhere - `PowerSourceMonitor` is woken by the system instead.
 enum PowerSourceReader {
     static func read() -> PowerStatus {
-        var reading = PowerStatus(thermal: ProcessInfo.processInfo.thermalState)
+        var reading = PowerStatus(
+            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            thermal: ProcessInfo.processInfo.thermalState
+        )
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else { return reading }
         // "Battery Power", "AC Power" or "UPS Power". The string is the one
         // `pmset` prints, and it is the only source that is right while a
@@ -64,6 +70,7 @@ enum PowerSourceReader {
 final class PowerSourceMonitor {
     private var source: CFRunLoopSource?
     private var thermalObserver: NSObjectProtocol?
+    private var lowPowerObserver: NSObjectProtocol?
     private let onChange: (PowerStatus) -> Void
 
     init(onChange: @escaping (PowerStatus) -> Void) {
@@ -91,6 +98,15 @@ final class PowerSourceMonitor {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.fire() }
         }
+        // One subscription for the whole app: the Keep Awake guard and the
+        // cadence of the samplers both live off this reading.
+        lowPowerObserver = NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.fire() }
+        }
     }
 
     func stop() {
@@ -101,6 +117,10 @@ final class PowerSourceMonitor {
         if let thermalObserver {
             NotificationCenter.default.removeObserver(thermalObserver)
             self.thermalObserver = nil
+        }
+        if let lowPowerObserver {
+            NotificationCenter.default.removeObserver(lowPowerObserver)
+            self.lowPowerObserver = nil
         }
     }
 

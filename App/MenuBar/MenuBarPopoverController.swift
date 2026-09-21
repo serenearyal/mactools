@@ -23,6 +23,8 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
     /// `--no-activate`. A capture run shows the popover without taking the
     /// front from whatever the user is doing.
     private var activates = true
+    /// `--popover-offscreen`. See `showOffscreen()`.
+    private var measurementWindow: NSWindow?
 
     var isShown: Bool { popover.isShown }
 
@@ -95,8 +97,61 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
     }
 
     func close() {
+        if let measurementWindow {
+            measurementWindow.orderOut(nil)
+            measurementWindow.contentViewController = nil
+            self.measurementWindow = nil
+            services.setPopoverVisible(false)
+        }
         guard isShown else { return }
         popover.performClose(nil)
+    }
+
+    // MARK: - The measurement host
+
+    /// `--popover-offscreen`, for `scripts/measure_idle.sh` alone.
+    ///
+    /// A real `NSPopover` never appears for an app that is not active, and a
+    /// measurement run may not activate anything, so the same view tree is
+    /// hosted in a borderless window instead: the same `MenuBarPopoverView`,
+    /// the same observation of the same stores, and the same
+    /// `setPopoverVisible(true)` demand, which is what decides the sampling.
+    ///
+    /// The window is pushed off the bottom-left corner of the main screen with
+    /// one point left on it. That one point is what keeps AppKit from marking
+    /// the window occluded, so SwiftUI really draws every update instead of
+    /// throttling it, and a sliver in the corner of the desktop takes no focus
+    /// and covers nothing the user is working in.
+    func showOffscreen() {
+        guard measurementWindow == nil, !isShown else { return }
+        services.windows.captureTarget()
+        let host = NSHostingController(rootView: content)
+        host.sizingOptions = [.preferredContentSize]
+        let size = CGSize(
+            width: PopoverLayout.width,
+            height: PopoverLayout.contentHeight + PopoverLayout.chromeHeight
+        )
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = host
+        window.isOpaque = false
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.level = .normal
+        window.collectionBehavior = [.stationary, .ignoresCycle, .fullScreenNone]
+        if let screen = NSScreen.main ?? NSScreen.screens.first {
+            window.setFrameOrigin(CGPoint(
+                x: screen.frame.minX - size.width + 1,
+                y: screen.frame.minY - size.height + 1
+            ))
+        }
+        window.orderFrontRegardless()
+        measurementWindow = window
+        services.setPopoverVisible(true)
     }
 
     private var content: MenuBarPopoverView {

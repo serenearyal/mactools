@@ -414,14 +414,17 @@ private struct CPUCell: View {
 final class ProcessIconCache {
     static let shared = ProcessIconCache()
 
-    private var icons: [String: NSImage] = [:]
+    /// Bounded: a Mac runs a few hundred distinct executables, and a table
+    /// that has been open for a week must not hold an image for every one that
+    /// ever appeared in it.
+    private var icons = LRUCache<String, NSImage>(capacity: 256)
     private lazy var generic = NSWorkspace.shared.icon(for: .unixExecutable)
 
     func icon(pid: Int32, path: String?) -> NSImage {
         guard let path, !path.isEmpty else { return generic }
-        if let cached = icons[path] { return cached }
+        if let cached = icons.value(forKey: path) { return cached }
         let icon = lookup(pid: pid, path: path) ?? generic
-        icons[path] = icon
+        icons.insert(icon, forKey: path)
         return icon
     }
 
