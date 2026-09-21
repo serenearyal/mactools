@@ -14,3 +14,9 @@ Rules from user corrections. Review at session start.
 - Rule: wall-clock measurements are short (20 s windows) during iterations; the full 60 s run occurs one time at the end.
 - Rule: build and install Release one time at the end of a batch, not after each change.
 - Rule: only the work that needs the GUI or the measurement stays serial, because of the focus-safety rules.
+
+## A wait loop must not find itself
+
+- The R8 agent left two background loops with `until ! pgrep -f "measure_idle.sh"`. The pattern also matches the loop's own command line, so the loops ran for hours and the agent looked active.
+- Rule: wait on a pid (`while kill -0 <pid>`), a pid file or `pgrep -x <name>`. Never use `pgrep -f` with a text that is in the waiting command.
+- Rule: when a batch ends, check for leftover processes of the session and stop them.
