@@ -91,6 +91,89 @@ struct StatRow: View {
     }
 }
 
+/// One number in a tile of its own: a caption, the value, and a quiet line
+/// under it that says what the number means.
+///
+/// The same caption-over-value as `StatBlock`, with a fill behind it: a row of
+/// five of them reads as five things rather than as one paragraph of numbers.
+struct StatTileModel: Identifiable {
+    let id: String
+    let caption: String
+    let value: String
+    var detail: String?
+    var tint: Color?
+}
+
+struct StatTile: View {
+    let model: StatTileModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(model.caption)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(model.value)
+                .font(.title3.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(model.tint ?? .primary)
+                .lineLimit(1)
+            if let detail = model.detail {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.18))
+        }
+    }
+}
+
+/// Tiles laid out in rows of the same width.
+///
+/// A `Grid` rather than an adaptive `LazyVGrid`: the columns line up across
+/// rows whatever is in them, and nothing lazy has to be scheduled for a
+/// handful of tiles the capture path renders outside a window.
+struct StatTileRow: View {
+    let tiles: [StatTileModel]
+    var perRow = 4
+
+    var body: some View {
+        Grid(alignment: .topLeading, horizontalSpacing: Layout.gutter, verticalSpacing: Layout.gutter) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                GridRow(alignment: .top) {
+                    ForEach(row) { StatTile(model: $0) }
+                    // The last row keeps the column widths of the rows above
+                    // it: four tiles in a row of five end where four of five
+                    // end, not spread over the whole width.
+                    ForEach(0..<max(0, perRow - row.count), id: \.self) { _ in
+                        Color.clear
+                    }
+                }
+            }
+        }
+        // The tiles fill the height of their row, which is what keeps four
+        // fills on one baseline when one of them has no second line. Without
+        // this the flexible height would travel up through the card and a
+        // stack would hand the tiles every spare point it had.
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var rows: [[StatTileModel]] {
+        guard perRow > 0 else { return [tiles] }
+        return stride(from: 0, to: tiles.count, by: perRow).map {
+            Array(tiles[$0..<min($0 + perRow, tiles.count)])
+        }
+    }
+}
+
 /// A bar cut into parts, used for memory and for disk space.
 struct SegmentedBar: View {
     struct Segment: Identifiable {

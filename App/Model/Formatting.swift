@@ -95,6 +95,14 @@ enum Fmt {
     static func watts(_ watts: Double) -> String {
         "\(watts.formatted(.number.precision(.fractionLength(1)))) W"
     }
+
+    /// The power of one app. Most apps sit far under a watt, where "0.0 W"
+    /// says nothing and ranks nothing: below one watt this speaks milliwatts.
+    static func appWatts(_ watts: Double) -> String {
+        if watts >= 1 { return Fmt.watts(watts) }
+        let milliwatts = (watts * 1000).rounded()
+        return milliwatts < 1 ? "< 1 mW" : "\(Int(milliwatts)) mW"
+    }
 }
 
 /// Green / yellow / red thresholds. These are the only colours the app picks

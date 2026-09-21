@@ -50,6 +50,14 @@ public struct ProcessInfoRow: Sendable, Codable, Equatable, Identifiable {
     public let cpuNanoseconds: UInt64?
     /// `ri_phys_footprint`, the number Activity Monitor calls Memory.
     public let memoryBytes: UInt64?
+    /// `ri_energy_nj`: the CPU energy this process has used since it started,
+    /// in nanojoules. It is a counter, so a figure for a window is the
+    /// difference of two readings - see `AppEnergyWindow`.
+    ///
+    /// nil when the call was refused and on a kernel whose newest rusage
+    /// flavour does not carry the field. Decoded as nil from a helper of a
+    /// build that did not send it.
+    public let energyNanojoules: UInt64?
 
     public var id: Int32 { pid }
     /// True when `proc_pid_rusage` failed, usually with EPERM on a root-owned
@@ -66,7 +74,8 @@ public struct ProcessInfoRow: Sendable, Codable, Equatable, Identifiable {
         startAbsoluteTime: UInt64?,
         cpuPercent: Double?,
         cpuNanoseconds: UInt64?,
-        memoryBytes: UInt64?
+        memoryBytes: UInt64?,
+        energyNanojoules: UInt64? = nil
     ) {
         self.pid = pid
         self.parentPID = parentPID
@@ -78,9 +87,16 @@ public struct ProcessInfoRow: Sendable, Codable, Equatable, Identifiable {
         self.cpuPercent = cpuPercent
         self.cpuNanoseconds = cpuNanoseconds
         self.memoryBytes = memoryBytes
+        self.energyNanojoules = energyNanojoules
     }
 
-    public func with(cpuPercent: Double?, cpuNanoseconds: UInt64?, memoryBytes: UInt64?, startAbsoluteTime: UInt64?) -> ProcessInfoRow {
+    public func with(
+        cpuPercent: Double?,
+        cpuNanoseconds: UInt64?,
+        memoryBytes: UInt64?,
+        startAbsoluteTime: UInt64?,
+        energyNanojoules: UInt64?
+    ) -> ProcessInfoRow {
         ProcessInfoRow(
             pid: pid,
             parentPID: parentPID,
@@ -91,7 +107,8 @@ public struct ProcessInfoRow: Sendable, Codable, Equatable, Identifiable {
             startAbsoluteTime: startAbsoluteTime,
             cpuPercent: cpuPercent,
             cpuNanoseconds: cpuNanoseconds,
-            memoryBytes: memoryBytes
+            memoryBytes: memoryBytes,
+            energyNanojoules: energyNanojoules
         )
     }
 }
@@ -196,7 +213,7 @@ public final class ProcessSampler: Sendable {
             for pid in pids {
                 guard let identity = ProcessSampler.identity(of: pid) else { continue }
                 let usage = ProcessSampler.resourceUsage(of: pid)
-                let start = usage?.ri_proc_start_abstime
+                let start = usage?.startAbsoluteTime
 
                 // The one lookup a pass can skip: the executable of a process
                 // that is still the one the last pass saw.
@@ -235,12 +252,12 @@ public final class ProcessSampler: Sendable {
                 }
 
                 let cpu = timebase.nanoseconds(
-                    fromAbsolute: usage.ri_user_time &+ usage.ri_system_time
+                    fromAbsolute: usage.userTime &+ usage.systemTime
                 )
                 let current = ProcessCPUSample(
                     cpuNanoseconds: cpu,
                     wallNanoseconds: wall,
-                    startAbsoluteTime: usage.ri_proc_start_abstime
+                    startAbsoluteTime: usage.startAbsoluteTime
                 )
                 live[pid] = CachedProcess(
                     cpu: current,
@@ -257,13 +274,14 @@ public final class ProcessSampler: Sendable {
                         command: identity.command,
                         name: name,
                         executablePath: path,
-                        startAbsoluteTime: usage.ri_proc_start_abstime,
+                        startAbsoluteTime: usage.startAbsoluteTime,
                         cpuPercent: ProcessCPUMath.percent(
                             previous: history[pid]?.cpu,
                             current: current
                         ),
                         cpuNanoseconds: cpu,
-                        memoryBytes: usage.ri_phys_footprint
+                        memoryBytes: usage.physFootprint,
+                        energyNanojoules: usage.energyNanojoules
                     )
                 )
             }
@@ -324,12 +342,14 @@ public final class ProcessSampler: Sendable {
                mine != theirs {
                 return row
             }
-            guard row.memoryBytes == nil || row.cpuPercent == nil else { return row }
+            guard row.memoryBytes == nil || row.cpuPercent == nil || row.energyNanojoules == nil
+            else { return row }
             return row.with(
                 cpuPercent: row.cpuPercent ?? other.cpuPercent,
                 cpuNanoseconds: row.cpuNanoseconds ?? other.cpuNanoseconds,
                 memoryBytes: row.memoryBytes ?? other.memoryBytes,
-                startAbsoluteTime: row.startAbsoluteTime ?? other.startAbsoluteTime
+                startAbsoluteTime: row.startAbsoluteTime ?? other.startAbsoluteTime,
+                energyNanojoules: row.energyNanojoules ?? other.energyNanojoules
             )
         }
         return merged + byPID.values.sorted { $0.pid < $1.pid }
@@ -396,14 +416,74 @@ public final class ProcessSampler: Sendable {
         return String(nullTerminated: buffer)
     }
 
+    /// What one pass needs out of `proc_pid_rusage`, whichever flavour of the
+    /// call answered.
+    struct ResourceUsage: Sendable, Equatable {
+        /// Mach units, not nanoseconds.
+        var userTime: UInt64
+        var systemTime: UInt64
+        var physFootprint: UInt64
+        var startAbsoluteTime: UInt64
+        /// nil on a kernel whose newest flavour carries no energy counter.
+        var energyNanojoules: UInt64?
+    }
+
+    /// True when this kernel answers `RUSAGE_INFO_V6`, the newest flavour the
+    /// SDK has and the first one that carries `ri_energy_nj`.
+    ///
+    /// Worked out once, against this process, rather than per pid: a root-owned
+    /// process refuses every flavour, so a per-pid fallback would double the
+    /// syscalls of a pass for the 200-odd processes that say no.
+    static let carriesEnergyCounter: Bool = {
+        var usage = rusage_info_v6()
+        let status = withUnsafeMutablePointer(to: &usage) { pointer in
+            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { rebound in
+                proc_pid_rusage(getpid(), RUSAGE_INFO_V6, rebound)
+            }
+        }
+        return status == 0
+    }()
+
     /// nil when the call is refused, which is EPERM for root-owned processes.
-    static func resourceUsage(of pid: pid_t) -> rusage_info_v4? {
+    ///
+    /// One syscall per process, the same one the CPU and the memory already
+    /// cost: the energy counter rides along in the wider flavour rather than
+    /// in a second call.
+    static func resourceUsage(of pid: pid_t) -> ResourceUsage? {
+        guard carriesEnergyCounter else { return legacyResourceUsage(of: pid) }
+        var usage = rusage_info_v6()
+        let status = withUnsafeMutablePointer(to: &usage) { pointer in
+            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { rebound in
+                proc_pid_rusage(pid, RUSAGE_INFO_V6, rebound)
+            }
+        }
+        guard status == 0 else { return nil }
+        return ResourceUsage(
+            userTime: usage.ri_user_time,
+            systemTime: usage.ri_system_time,
+            physFootprint: usage.ri_phys_footprint,
+            startAbsoluteTime: usage.ri_proc_start_abstime,
+            energyNanojoules: usage.ri_energy_nj
+        )
+    }
+
+    /// The pass on a kernel with no `ri_energy_nj`: everything else is the
+    /// same, and the energy falls back to what the process was billed for,
+    /// which several Macs leave at zero.
+    private static func legacyResourceUsage(of pid: pid_t) -> ResourceUsage? {
         var usage = rusage_info_v4()
         let status = withUnsafeMutablePointer(to: &usage) { pointer in
             pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { rebound in
                 proc_pid_rusage(pid, RUSAGE_INFO_V4, rebound)
             }
         }
-        return status == 0 ? usage : nil
+        guard status == 0 else { return nil }
+        return ResourceUsage(
+            userTime: usage.ri_user_time,
+            systemTime: usage.ri_system_time,
+            physFootprint: usage.ri_phys_footprint,
+            startAbsoluteTime: usage.ri_proc_start_abstime,
+            energyNanojoules: usage.ri_billed_energy > 0 ? usage.ri_billed_energy : nil
+        )
     }
 }

@@ -37,9 +37,25 @@ struct PopoverLayoutTests {
     func batteryHoldsItsRows() {
         let height = PopoverLayout.DashboardHeight.self
         let rows = height.batteryValue + height.batteryBar + height.batteryState
-            + height.batteryStats + height.batteryDetail
-        let spacing = PopoverLayout.rowSpacing * 4 + PopoverLayout.sectionSpacing * 2
+            + height.batteryStats + height.batteryEnergy
+        let spacing = PopoverLayout.batteryRowSpacing * 4 + PopoverLayout.sectionSpacing * 2
         #expect(rows + spacing == height.battery)
+    }
+
+    @Test("The energy list is three rows of one height")
+    func energyRowsFillTheirBox() {
+        let height = PopoverLayout.DashboardHeight.self
+        #expect(height.batteryEnergyRow * 3 == height.batteryEnergy)
+    }
+
+    /// The energy list was paid for out of the padding of Top Processes, not
+    /// out of its rows: 92 pt of content there before and after, so the three
+    /// processes per column are drawn at the size they always were.
+    @Test("Top Processes gives up padding, not content")
+    func processesKeepsItsContent() {
+        let height = PopoverLayout.DashboardHeight.self
+        #expect(height.processes - PopoverLayout.processesPadding * 2 == 92)
+        #expect(PopoverLayout.processesPadding < PopoverLayout.sectionSpacing)
     }
 
     @Test("The Fans section fills the same content height as the Dashboard")

@@ -2,7 +2,8 @@ import SwiftUI
 import SysMetrics
 
 /// The Battery section of the Dashboard: the charge, what the battery is
-/// doing, and the four numbers a laptop owner looks up once a week.
+/// doing, the three numbers a laptop owner looks up, and the three apps that
+/// are spending the charge right now.
 ///
 /// It stands where Thermals and Fans used to be. Those moved to a section of
 /// their own, where they have the room for the controls; the Dashboard is for
@@ -11,10 +12,12 @@ import SysMetrics
 ///
 /// Five fixed boxes, `PopoverLayout.DashboardHeight.battery*`: a Mac with no
 /// battery, a battery that is calculating and a battery at 100 % all draw the
-/// same height, so nothing in the panel moves between two samples.
+/// same height, so nothing in the panel moves between two samples. The header
+/// opens the Battery tab, which is where the history, the cell temperature and
+/// the whole energy list live.
 struct PopoverBattery: View {
     let store: MetricsStore
-    let settings: AppSettings
+    let processes: ProcessStore
     let open: (MainTab) -> Void
 
     private typealias Height = PopoverLayout.DashboardHeight
@@ -55,12 +58,12 @@ struct PopoverBattery: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PopoverLayout.rowSpacing) {
+        VStack(alignment: .leading, spacing: PopoverLayout.batteryRowSpacing) {
             titleRow
             levelBar
             stateRow
             statsRow
-            detailRow
+            energyRows
         }
         .task {
             try? await Task.sleep(for: PopoverBattery.settleDelay)
@@ -70,14 +73,12 @@ struct PopoverBattery: View {
 
     // MARK: - The charge
 
-    /// The title opens the Overview: there is no Battery tab, and the window
-    /// shows the same reading there.
     private var titleRow: some View {
         HStack(spacing: PopoverLayout.rowSpacing) {
             PopoverSectionTitle(
                 title: "Battery",
                 symbolName: "battery.100percent",
-                tab: .overview,
+                tab: .battery,
                 open: open
             )
             Spacer(minLength: PopoverLayout.rowSpacing)
@@ -124,16 +125,11 @@ struct PopoverBattery: View {
     }
 
     /// Green, amber, red. The thresholds are the ones macOS itself warns at,
-    /// and the palette is `MetricColor`'s so the Dashboard speaks one language
-    /// from the CPU down to the battery.
+    /// and the palette is the tab's, so the popover and the window say the
+    /// same thing about the same charge.
     private var tint: Color {
         guard let reading = phase.reading else { return .secondary.opacity(0.4) }
-        if reading.isPluggedIn, !reading.isCharging, reading.percent > 20 { return .green }
-        switch reading.percent {
-        case ..<11: return .red
-        case ..<21: return .yellow
-        default: return .green
-        }
+        return BatteryText.tint(reading)
     }
 
     // MARK: - What it is doing
@@ -160,76 +156,53 @@ struct PopoverBattery: View {
 
     private var stateText: String {
         switch phase {
-        case .waiting:
-            return "Reading the battery…"
-        case .absent:
-            return "No battery. This Mac runs on mains power."
-        case .battery(let reading):
-            // `stateDescription` is the word for the state, and this is the
-            // one place that adds the time to it. "Fully charged" rather than
-            // its "Charged": the popover has the room, and the reader who
-            // looks here wants to be told it is done, not labelled.
-            if reading.isCharged || (reading.isPluggedIn && reading.percent >= 100) {
-                return "Fully charged"
-            }
-            guard let minutes = reading.minutesRemaining else {
-                // A battery that is neither charging nor emptying has no time
-                // to report, and saying "calculating" about it would be a lie.
-                guard reading.isCharging || !reading.isPluggedIn else {
-                    return reading.stateDescription
-                }
-                return "\(reading.stateDescription) - calculating…"
-            }
-            let clause = reading.isCharging
-                ? "\(PopoverBattery.duration(minutes)) to full"
-                : "\(PopoverBattery.duration(minutes)) left"
-            return "\(reading.stateDescription) - \(clause)"
+        case .waiting: return "Reading the battery…"
+        case .absent: return "No battery. This Mac runs on mains power."
+        case .battery(let reading): return BatteryText.state(reading)
         }
-    }
-
-    /// "38 min", "5 h 12 min", "5 h". Hours first, because the difference
-    /// between four hours and five is what the reader is after.
-    static func duration(_ minutes: Int) -> String {
-        let total = max(0, minutes)
-        guard total >= 60 else { return "\(total) min" }
-        let hours = total / 60
-        let rest = total % 60
-        return rest == 0 ? "\(hours) h" : "\(hours) h \(rest) min"
     }
 
     // MARK: - The numbers
 
-    /// The three that move, in the same caption-over-value boxes the Fans
-    /// section gives the dies. Each box is a third of the width whatever is in
-    /// it, so a watt going from 9.8 to 10 moves nothing beside it.
+    /// The three that move, on one line of caption-value pairs.
+    ///
+    /// They used to be three stacked boxes 34 pt tall, with the cell
+    /// temperature and the adapter under them. One line of pairs says the same
+    /// three things in 16 pt, and the 32 pt that buys is the energy list.
     private var statsRow: some View {
-        HStack(alignment: .top, spacing: PopoverLayout.rowSpacing) {
-            PopoverStat(caption: powerCaption, value: powerText)
+        HStack(spacing: PopoverLayout.padding) {
+            pair(caption: powerCaption, value: powerText)
                 .help("The power going into the battery, or coming out of it")
-            PopoverStat(caption: "HEALTH", value: healthText)
+            pair(caption: "HEALTH", value: healthText)
                 .help("What is left of the capacity this battery had when it was new")
-            PopoverStat(caption: "CYCLES", value: cycleText)
+            pair(caption: "CYCLES", value: cycleText)
                 .help("Charge cycles since the battery was made")
+            Spacer(minLength: PopoverLayout.rowSpacing)
+            // The heading of the three rows under it, over the column they
+            // are read in. Without it the list is three apps with watts
+            // beside them, and the panel already has a list of processes.
+            Text("ENERGY BY APP")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
         }
         .frame(height: Height.batteryStats)
     }
 
-    /// The two that barely move, quiet under the three that do.
-    private var detailRow: some View {
-        HStack(spacing: PopoverLayout.rowSpacing) {
-            Text(temperatureText)
-            Spacer(minLength: PopoverLayout.rowSpacing)
-            Text(adapterText)
+    private func pair(caption: String, value: String) -> some View {
+        HStack(spacing: 5) {
+            Text(caption)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
         }
-        .font(.caption)
-        .monospacedDigit()
-        .foregroundStyle(.tertiary)
         .lineLimit(1)
-        .frame(height: Height.batteryDetail)
     }
 
     /// "CHARGING" while the watts are going in, so the sign of the number
-    /// below is spelled out rather than left to a plus.
+    /// beside it is spelled out rather than left to a plus.
     private var powerCaption: String {
         guard let reading = phase.reading, let watts = reading.watts, watts != 0 else {
             return "POWER"
@@ -239,26 +212,7 @@ struct PopoverBattery: View {
 
     private var powerText: String {
         guard let reading = phase.reading, let watts = reading.watts else { return "--" }
-        return PopoverBattery.signedWatts(watts)
-    }
-
-    /// Only while there is one to name: on battery the line above has already
-    /// said so, and "No adapter" under it would be a second way to say
-    /// nothing.
-    private var adapterText: String {
-        guard let reading = phase.reading, reading.isPluggedIn else { return "" }
-        guard let adapter = reading.adapterWatts else { return "On the adapter" }
-        return "\(adapter) W adapter"
-    }
-
-    /// "+46 W" into the battery, "-11.4 W" out of it. One decimal under 10 W,
-    /// none above: a laptop on battery draws single digits, and a charger at
-    /// 96 W does not need a tenth.
-    static func signedWatts(_ watts: Double) -> String {
-        let magnitude = abs(watts)
-        let digits = magnitude < 10 ? 1 : 0
-        let sign = watts > 0 ? "+" : (watts < 0 ? "-" : "")
-        return "\(sign)\(magnitude.formatted(.number.precision(.fractionLength(digits)))) W"
+        return BatteryText.signedWatts(watts)
     }
 
     private var healthText: String {
@@ -271,8 +225,66 @@ struct PopoverBattery: View {
         return count.formatted()
     }
 
-    private var temperatureText: String {
-        guard let celsius = phase.reading?.temperatureCelsius else { return "" }
-        return "Cells at \(Fmt.temperature(celsius, unit: settings.temperatureUnit))"
+    // MARK: - What is spending it
+
+    /// The three apps with the most energy behind them, in three 16 pt rows.
+    ///
+    /// The box is the same height whatever is in it: three rows, a line that
+    /// says the measurement has not finished yet, or three placeholder rows on
+    /// a Mac that has only just opened the panel.
+    private var energyRows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if apps.isEmpty {
+                Text("Measuring which apps use the most energy…")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .frame(height: Height.batteryEnergyRow, alignment: .leading)
+            } else {
+                ForEach(apps) { app in
+                    PopoverEnergyRow(app: app, open: open)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(height: Height.batteryEnergy, alignment: .topLeading)
+    }
+
+    private var apps: [AppEnergy] { Array(processes.topEnergyApps.prefix(3)) }
+}
+
+/// One app in the Dashboard's energy list: its icon, its name and its watts.
+///
+/// A click opens the Battery tab, where the same list has its share bars, its
+/// process counts and the sentence that says what the measurement leaves out.
+private struct PopoverEnergyRow: View {
+    let app: AppEnergy
+    let open: (MainTab) -> Void
+
+    var body: some View {
+        Button { open(.battery) } label: {
+            HStack(spacing: 6) {
+                Image(nsImage: BatteryText.icon(bundlePath: app.bundlePath))
+                    .resizable()
+                    .frame(width: 13, height: 13)
+                Text(app.name)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 6)
+                Text(Fmt.appWatts(app.watts))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: 52, alignment: .trailing)
+            }
+            .font(.caption)
+            .frame(height: PopoverLayout.DashboardHeight.batteryEnergyRow)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(
+            app.processCount > 1
+                ? "\(app.name), \(app.processCount) processes. Open the Battery tab"
+                : "\(app.name). Open the Battery tab"
+        )
     }
 }

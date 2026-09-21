@@ -20,8 +20,10 @@ struct OverviewView: View {
                     }
                     OverviewCards(
                         store: services.store,
+                        processes: services.processes,
                         settings: services.settings,
-                        twoColumns: proxy.size.width >= Layout.twoColumnWidth
+                        twoColumns: proxy.size.width >= Layout.twoColumnWidth,
+                        open: { services.selectedTab = $0 }
                     )
                 }
                 .padding(Layout.cardSpacing)
@@ -37,8 +39,13 @@ struct OverviewView: View {
 /// them on screen.
 struct OverviewCards: View {
     let store: MetricsStore
+    let processes: ProcessStore
     let settings: AppSettings
     let twoColumns: Bool
+    /// Where a card that is a summary of a tab sends the reader. The capture
+    /// path renders the cards outside the window, where there is no tab to
+    /// select, so it has somewhere to be nothing.
+    var open: (MainTab) -> Void = { _ in }
 
     /// Every card takes the store, not a snapshot of it.
     ///
@@ -50,6 +57,13 @@ struct OverviewCards: View {
     var body: some View {
         if twoColumns {
             Grid(horizontalSpacing: Layout.cardSpacing, verticalSpacing: Layout.cardSpacing) {
+                // Across the top, full width: the charge is the first thing a
+                // laptop owner opens this window for, and the card is one row
+                // tall. Below it the 2 x 2 grid is what it always was.
+                GridRow(alignment: .top) {
+                    BatteryCard(store: store, processes: processes, open: open)
+                        .gridCellColumns(2)
+                }
                 GridRow(alignment: .top) {
                     CPUCard(store: store)
                     MemoryCard(store: store)
@@ -61,12 +75,95 @@ struct OverviewCards: View {
             }
         } else {
             VStack(spacing: Layout.cardSpacing) {
+                BatteryCard(store: store, processes: processes, open: open)
                 CPUCard(store: store)
                 MemoryCard(store: store)
                 StorageCard(store: store)
                 ThermalsCard(store: store, settings: settings)
             }
         }
+    }
+}
+
+// MARK: - Battery
+
+/// The charge, what it is doing, and the one app that is spending the most of
+/// it. The whole card opens the Battery tab, where all of that has room.
+private struct BatteryCard: View {
+    let store: MetricsStore
+    let processes: ProcessStore
+    let open: (MainTab) -> Void
+
+    @State private var hovering = false
+
+    private var battery: BatteryReading? { store.battery }
+
+    var body: some View {
+        Button { open(.battery) } label: {
+            // Not `.link` and not a bordered button: a link style draws as an
+            // empty box under `ImageRenderer`, which is how the capture path
+            // sees this card.
+            card.contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Open the Battery tab")
+    }
+
+    private var card: some View {
+        Card(title: "Battery", symbolName: BatteryText.symbolName(battery), fills: false) {
+            HStack(alignment: .firstTextBaseline, spacing: Layout.gutter * 2) {
+                Text(battery.map { "\($0.percent.clamped(to: 0...100))%" } ?? "--")
+                    .font(.system(size: 28, weight: .semibold))
+                    .monospacedDigit()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(BatteryText.state(battery))
+                        .font(.callout)
+                        .lineLimit(1)
+                    Text(energyLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: Layout.gutter)
+                if battery?.lowPowerMode == true {
+                    Label("Low Power Mode", systemImage: "battery.50percent")
+                        .font(.caption.weight(.medium))
+                        .imageScale(.small)
+                        .foregroundStyle(.yellow)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background { Capsule(style: .continuous).fill(Color.yellow.opacity(0.14)) }
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(hovering ? Color.secondary : Color(nsColor: .tertiaryLabelColor))
+            }
+
+            SegmentedBar(
+                segments: [
+                    .init(
+                        id: "level",
+                        value: Double(battery?.percent.clamped(to: 0...100) ?? 0),
+                        style: BatteryText.tint(battery)
+                    )
+                ],
+                total: 100
+            )
+        }
+    }
+
+    /// "Arc is using the most: 4.2 W", or what the list can honestly say
+    /// before it has two samples to compare.
+    private var energyLine: String {
+        guard let top = processes.topEnergyApps.first else {
+            return "Measuring which apps use the most energy…"
+        }
+        // "MacTools is using the most: 0.0 W" is a true sentence that says
+        // nothing. Under a tenth of a watt the machine is idle, and that is
+        // the thing worth saying.
+        guard top.watts >= 0.05 else { return "No app is using much energy" }
+        return "\(top.name) is using the most: \(Fmt.appWatts(top.watts))"
     }
 }
 

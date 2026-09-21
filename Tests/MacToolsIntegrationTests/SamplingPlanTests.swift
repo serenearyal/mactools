@@ -370,6 +370,25 @@ struct SamplingPlanTests {
         #expect(!SamplingPlan.samplesProcesses(SamplingDemand(activeTab: .processes)))
     }
 
+    @Test("The Battery tab reads the battery and the processes behind it")
+    func batteryTabDemand() {
+        let plan = SamplingPlan.windowRequest(tab: .battery, showsUnlabelledSensors: false)
+        #expect(plan == SampleRequest(cpu: false, battery: true))
+        // The apps using the most energy come out of the process pass, which
+        // is a store of its own.
+        let demand = SamplingDemand(consumers: .window, activeTab: .battery)
+        #expect(SamplingPlan.samplesProcesses(demand))
+        // Ten rows on a tab are a glance, like the popover's three.
+        #expect(SamplingPlan.processInterval(demand) == SamplingPlan.popoverProcessInterval)
+        // With neither the tab nor the Dashboard on screen, nothing new is
+        // sampled at all: no battery in the request and no process pass.
+        let elsewhere = SamplingDemand(consumers: .window, activeTab: .overview)
+        #expect(!SamplingPlan.samplesProcesses(elsewhere))
+        #expect(!SamplingPlan.samplesProcesses(SamplingDemand(activeTab: .battery)))
+        #expect(!request(SamplingDemand(consumers: .window, activeTab: .windows)).battery)
+        #expect(request(demand).battery)
+    }
+
     @Test("The popover reads the process table slower than its own tab does")
     func processCadence() {
         // The profiler says one libproc pass over 580 processes is the most
@@ -919,7 +938,7 @@ struct MainTabTests {
     @Test("Every tab sits in exactly one sidebar section, in the sidebar order")
     func sections() {
         #expect(MainTabSection.orderedTabs == MainTab.allCases)
-        #expect(MainTabSection.monitor.tabs == [.overview, .sensors, .processes, .storage])
+        #expect(MainTabSection.monitor.tabs == [.overview, .sensors, .processes, .storage, .battery])
         #expect(MainTabSection.control.tabs == [.fans, .windows, .keepAwake])
         #expect(MainTabSection.tools.tabs == [.keyboardLock, .backlight])
         #expect(MainTabSection.app.tabs == [.settings])

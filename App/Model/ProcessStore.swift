@@ -77,6 +77,15 @@ final class ProcessStore {
     private(set) var derived = ProcessRows()
     private(set) var helperRowCount = 0
     private(set) var helperFailure: String?
+    /// The apps using the most energy, heaviest first, at most ten.
+    ///
+    /// Empty until two passes have landed: `ri_energy_nj` is a counter, so one
+    /// pass is a baseline with nothing to subtract from. CPU energy only - the
+    /// display, the radios and the rest of the machine are not in it.
+    private(set) var topEnergyApps: [AppEnergy] = []
+    /// How long the mean of `topEnergyApps` covers, in seconds, for the
+    /// caption. It grows to the five minute window and then stays there.
+    private(set) var energyWindowSeconds: Double = 0
     /// The result of the last action, for the footer.
     private(set) var message: String?
     /// Passes since launch, for the capture path. See `MetricsStore`.
@@ -122,6 +131,13 @@ final class ProcessStore {
     @ObservationIgnored private let names = UserNameCache.shared
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var demand = SamplingDemand()
+    /// The rolling five minutes of per-app energy. It survives a stop for the
+    /// same reason the CPU baselines do, and it drops a window it cannot
+    /// honestly average when the gap is longer than the window itself.
+    @ObservationIgnored private var energy = AppEnergyWindow()
+
+    /// The Battery tab shows ten rows.
+    private static let energyAppLimit = 10
 
     /// The uid of this process. Its rows can be signalled without the helper.
     static let currentUID = getuid()
@@ -206,6 +222,13 @@ final class ProcessStore {
 
     private func apply(_ sample: ProcessFeed.Sample) {
         sampleCount += 1
+        // Before the rows are derived: the window wants every process, not the
+        // slice the user filtered the table down to.
+        energy.add(sample.rows)
+        let apps = energy.topApps(limit: ProcessStore.energyAppLimit)
+        if apps != topEnergyApps { topEnergyApps = apps }
+        let covered = energy.coveredSeconds
+        if covered != energyWindowSeconds { energyWindowSeconds = covered }
         derived = ProcessRows.make(
             rows: sample.rows.map { ProcessTableRow(info: $0, userName: names.name(for: $0.uid)) },
             scope: filterScope,

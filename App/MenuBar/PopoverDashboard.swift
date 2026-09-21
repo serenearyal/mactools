@@ -31,10 +31,16 @@ struct PopoverDashboard: View {
             }
             Divider()
             section(height: PopoverLayout.DashboardHeight.battery) {
-                PopoverBattery(store: store, settings: services.settings, open: open)
+                PopoverBattery(store: store, processes: services.processes, open: open)
             }
             Divider()
-            section(height: PopoverLayout.DashboardHeight.processes) {
+            // The one section with less padding than the rest: the 8 pt are
+            // the three energy rows of the Battery section above it, and the
+            // three process rows keep every point of their own content.
+            section(
+                height: PopoverLayout.DashboardHeight.processes,
+                padding: PopoverLayout.processesPadding
+            ) {
                 ProcessSection(processes: services.processes, reports: services.reports, open: open)
             }
         }
@@ -48,11 +54,12 @@ struct PopoverDashboard: View {
     /// stays that section's business.
     private func section<Content: View>(
         height: CGFloat,
+        padding: CGFloat = PopoverLayout.sectionSpacing,
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
             .padding(.horizontal, PopoverLayout.padding)
-            .padding(.vertical, PopoverLayout.sectionSpacing)
+            .padding(.vertical, padding)
             .frame(width: PopoverLayout.width, height: height, alignment: .topLeading)
     }
 }

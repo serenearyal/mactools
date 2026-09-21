@@ -84,6 +84,12 @@ struct TabDetailView: View {
                 reports: services.reports,
                 showSettings: { services.selectedTab = .settings }
             )
+        case .battery:
+            BatteryView(
+                store: services.store,
+                processes: services.processes,
+                settings: services.settings
+            )
         case .storage:
             StorageView(
                 store: services.store,

@@ -161,6 +161,11 @@ enum SamplingPlan {
             SampleRequest(cpu: false, temperatures: .labelled, fans: true)
         case .storage:
             SampleRequest(cpu: false, diskSpace: true, diskIO: true)
+        case .battery:
+            // The charge, the health and the 24 h graph. The list of the apps
+            // using the most energy comes with it, from `ProcessStore`: see
+            // `samplesProcesses`.
+            SampleRequest(cpu: false, battery: true)
         // The process table comes from `ProcessStore`, not from a metrics
         // pass, and the five tabs after it show no live number at all.
         case .processes, .windows, .keepAwake, .keyboardLock, .backlight, .settings:
@@ -411,10 +416,13 @@ enum SamplingPlan {
     }
 
     /// The process table costs one libproc round trip per process, so it only
-    /// runs for somebody who is looking at it: its own tab, or the Dashboard
-    /// section of the popover.
+    /// runs for somebody who is looking at it: its own tab, the Battery tab -
+    /// which draws the apps using the most energy out of the same pass - or
+    /// the Dashboard section of the popover.
     static func samplesProcesses(_ demand: SamplingDemand) -> Bool {
-        demand.showsTab(.processes) || demand.showsPopoverSection(.dashboard)
+        demand.showsTab(.processes)
+            || demand.showsTab(.battery)
+            || demand.showsPopoverSection(.dashboard)
     }
 
     /// How often that pass runs.
@@ -422,8 +430,8 @@ enum SamplingPlan {
     /// One pass is a libproc round trip for each of about 580 processes, and
     /// the profiler says it is the most expensive thing an open popover does.
     /// The table on its own tab is worth Activity Monitor's three seconds; the
-    /// three rows per column in the popover are a glance, and five is plenty
-    /// for them.
+    /// three rows per column in the popover and the energy list of the Battery
+    /// tab are a glance, and five is plenty for them.
     static func processInterval(_ demand: SamplingDemand) -> Duration {
         demand.showsTab(.processes) ? processInterval : popoverProcessInterval
     }

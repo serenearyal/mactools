@@ -624,10 +624,21 @@ enum DebugCapture {
                     // window really draws.
                     OverviewCards(
                         store: services.store,
+                        processes: services.processes,
                         settings: services.settings,
                         twoColumns: size.width >= Layout.twoColumnWidth
                     )
                 }
+                .padding(Layout.cardSpacing)
+            } else if services.selectedTab == .battery {
+                // The same rule again: the Battery tab is a scroll view, and
+                // `ImageRenderer` draws nothing for one.
+                BatteryContent(
+                    store: services.store,
+                    processes: services.processes,
+                    settings: services.settings,
+                    twoColumns: size.width >= Layout.twoColumnWidth
+                )
                 .padding(Layout.cardSpacing)
             } else if services.selectedTab == .windows {
                 WindowsContent(

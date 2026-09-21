@@ -19,6 +19,7 @@ commands:
   disks        print the mounted volumes with their capacity
   io           print disk I/O throughput over one second
   battery      print the battery: charge, state, cycles, health, watts
+  energy       print the apps using the most CPU energy, in watts
   procs        print the process table
   watch        stream CPU, memory, disk I/O, power and CPU temperature
   scan         run the largest-files scan
@@ -42,6 +43,9 @@ options:
   procs        --sort cpu|mem   order of the table (default cpu)
                --top N          number of rows (default 15)
                --helper         merge the snapshot of the privileged helper
+  energy       --interval S     seconds between the two passes (default 10)
+               --top N          number of apps (default 10)
+               --helper         include the processes this user does not own
   watch        --interval S     seconds between lines (default 1)
   scan         --root PATH      where to start (default \(Scan.dataVolumePath))
                --top N          number of rows (default 20)
@@ -155,6 +159,13 @@ do {
     case "battery":
         try withoutOptions()
         try MetricsCommands.battery()
+    case "energy":
+        let options = try Options(tail, allowed: ["interval", "top"], flags: ["helper"])
+        try EnergyCommands.top(
+            interval: try options.double("interval", default: 10, range: 1...600),
+            count: try options.integer("top", default: 10, range: 1...1_000),
+            useHelper: options.flag("helper")
+        )
     case "procs":
         let options = try Options(tail, allowed: ["sort", "top", "interval"], flags: ["helper"])
         let name = options.string("sort") ?? "cpu"

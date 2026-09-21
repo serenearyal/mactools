@@ -8,6 +8,13 @@ enum PopoverLayout {
     static let padding: CGFloat = 16
     static let rowSpacing: CGFloat = 8
     static let sectionSpacing: CGFloat = 12
+    /// Inside the Battery section only. Six rather than eight: the section
+    /// carries six boxes now that the energy list is in it, and the two points
+    /// a gap gives back are two points the list can have.
+    static let batteryRowSpacing: CGFloat = 6
+    /// The vertical padding of the Top Processes section, which is the one
+    /// section that gives its padding up. See `DashboardHeight.battery`.
+    static let processesPadding: CGFloat = 8
     /// Every clickable thing is at least this tall.
     static let hitTarget: CGFloat = 28
     /// The inset of the segmented control around its segments, and the gap
@@ -67,20 +74,28 @@ enum PopoverLayout {
         static let cpu: CGFloat = 74
         static let memory: CGFloat = 80
         static let storage: CGFloat = 80
-        static let battery: CGFloat = 154
-        static let processes: CGFloat = 116
+        static let battery: CGFloat = 162
+        static let processes: CGFloat = 108
         static let all: [CGFloat] = [cpu, memory, storage, battery, processes]
 
         /// The five rows of the Battery section. Every one of them is a fixed
         /// box: the percentage, the level bar, the line that says what the
-        /// battery is doing, the three numbers that move, and the two that do
-        /// not. A Mac with no battery fills the same five boxes, so the
-        /// section is the same height on every machine.
+        /// battery is doing, the three numbers on one line, and the three apps
+        /// that are spending the charge. A Mac with no battery fills the same
+        /// five boxes, so the section is the same height on every machine.
+        ///
+        /// The section grew by 8 pt for the energy list, and the 8 pt came out
+        /// of the vertical padding of Top Processes under it: that section
+        /// keeps all three of its rows and every point of its content, and the
+        /// panel is the same 600 pt it has always been. The quiet "Cells at
+        /// 30 C" line went instead - the cell temperature is on the Battery
+        /// tab now, beside the health and the cycles.
         static let batteryValue: CGFloat = 22
         static let batteryBar: CGFloat = 8
         static let batteryState: CGFloat = 20
-        static let batteryStats: CGFloat = 34
-        static let batteryDetail: CGFloat = 14
+        static let batteryStats: CGFloat = 16
+        static let batteryEnergyRow: CGFloat = 16
+        static let batteryEnergy: CGFloat = batteryEnergyRow * 3
     }
 
     /// The Fans section, which spends the same `contentHeight` on one row of

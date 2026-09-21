@@ -33,6 +33,19 @@ struct SensorTrace: Sendable, Identifiable {
     }
 }
 
+/// One battery read, for the 24 h chart of the Battery tab.
+///
+/// The date comes with it because these points are minutes apart, not one
+/// interval apart like the ring buffers: the battery has a 30 s floor under it
+/// and the tab can be off screen for hours, so the chart has to plot against
+/// real time and show the gaps as gaps.
+struct BatteryPoint: Sendable, Equatable {
+    let date: Date
+    /// 0...100.
+    let percent: Int
+    let isCharging: Bool
+}
+
 /// The graph history. 300 samples is 5 minutes at the 1 s interval.
 ///
 /// Its own file, away from `MetricsStore`: the store is an `@Observable` class
@@ -48,6 +61,18 @@ struct MetricsHistory: Sendable {
     var diskRead = RingBuffer<Double>(capacity: capacity)
     var diskWrite = RingBuffer<Double>(capacity: capacity)
     var sensors: [SMCFourCC: SensorTrace] = [:]
+
+    /// A day of battery reads, one per read rather than one per pass: the
+    /// battery has a 30 s floor under it, so this is about 2880 points.
+    ///
+    /// Memory only. Nothing is written to disk, so the chart starts again after
+    /// a relaunch, and a day is what it can ever show.
+    static let batteryWindow: TimeInterval = 24 * 60 * 60
+    /// The guard on the memory if anything ever reads the battery faster than
+    /// the floor allows: 24 h at 30 s is 2880, and this is room to spare.
+    static let batteryCapacity = 4_000
+
+    var battery: [BatteryPoint] = []
 
     mutating func append(_ sample: MetricsSample, snapshot: MetricsSnapshot) {
         if let cpu = sample.cpu {
@@ -80,6 +105,27 @@ struct MetricsHistory: Sendable {
         if let rates = sample.diskIO {
             diskRead.append(rates.bytesReadPerSecond)
             diskWrite.append(rates.bytesWrittenPerSecond)
+        }
+        // `batteryRead` and not the value: a pass that did not ask for the
+        // battery carries the old reading, and plotting it again would draw a
+        // flat line through a gap the tab was not on screen for.
+        if sample.batteryRead, let reading = sample.battery {
+            appendBattery(reading, at: sample.date)
+        }
+    }
+
+    /// One battery read, with everything older than a day dropped.
+    private mutating func appendBattery(_ reading: BatteryReading, at date: Date) {
+        battery.append(
+            BatteryPoint(date: date, percent: reading.percent, isCharging: reading.isCharging)
+        )
+        let cutoff = date.addingTimeInterval(-MetricsHistory.batteryWindow)
+        // One `removeFirst(_:)` rather than one per point: dropping from the
+        // front of an array moves every element that is left.
+        let stale = battery.prefix { $0.date < cutoff }.count
+        if stale > 0 { battery.removeFirst(stale) }
+        if battery.count > MetricsHistory.batteryCapacity {
+            battery.removeFirst(battery.count - MetricsHistory.batteryCapacity)
         }
     }
 
