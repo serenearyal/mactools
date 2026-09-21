@@ -101,7 +101,7 @@ Every section title opens the matching tab.
 | Thermals & Fans | Hottest CPU sensor, GPU, system power, each fan with its mode and speed, and Auto / Full Blast | Fans |
 | Top Processes | The three heaviest by CPU and by memory, and the Copy for AI button | Processes |
 
-**Windows** is the window manager: the app and window that were in front, the tile grid, the extra actions, the gap slider and the conflict banner.
+**Windows** is the window manager: the app and window that were in front, the command list with its shortcuts, the gap slider and the conflict banner.
 A tile moves that window and hands the front back to the app it belongs to.
 
 **Tools** holds one row each for Keep Awake, Keyboard Backlight, Fans, Keyboard Lock, Copy for AI and Scan Storage, in that order; the rows share the fixed height of the panel between them, so a Mac with no keyboard backlight gets five slightly taller rows rather than a hole.
@@ -248,9 +248,11 @@ The Fans tab is the place to set a mode that should last.
 
 ## Windows
 
-Vent tiles the window that was in front: halves, corners, thirds, two thirds, maximize, almost maximize, maximize height, center, restore, larger, smaller and the move to the next or the previous display.
-The Windows tab and the Windows section of the popover draw the same grid of miniature screens; a click moves the window, and from the popover the app you were in comes back to the front.
-Pressing the same tile again walks a ladder, the way Rectangle does: a half becomes two thirds, then one third, then the half again, and the thirds walk first, center, last.
+Vent tiles the window that was in front: halves, center half, corners, thirds, two thirds, maximize, almost maximize, maximize height, center, restore, larger, smaller and the move to the next or the previous display.
+The Windows tab, the Windows section of the popover and the **Window** submenu of the status item's right-click menu draw the same command list, in Rectangle's order: a glyph of the target region, the name and the shortcut.
+A click moves the window, and from the popover the app you were in comes back to the front.
+A command that cannot apply (a display move with one screen) is dimmed.
+Pressing the same command again walks a ladder, the way Rectangle does: a half becomes two thirds, then one third, then the half again, and the thirds walk first, center, last.
 The ladder starts over after two seconds or as soon as you move the window yourself.
 
 **Gap** (0 to 40 pt) is the space between two tiled windows and between a window and the screen edge.
@@ -260,11 +262,13 @@ Two neighbours are exactly one gap apart, whatever the rounding, and the tiles i
 
 | Set | Tiles | Extras |
 |-----|-------|--------|
-| Rectangle layout | ⌃⌥ + key | ⌃⌥⌘ + key |
-| Alternate layout | ⌃⌥⇧ + key | ⌃⌥⇧⌘ + key |
+| Rectangle layout | ⌃⌥ + key | ⌃⌥⇧↑ maximize height, ⌃⌥⌘ arrows for the displays |
+| Alternate layout | ⌃⌥⇧⌘ + key | ⌃⇧⌘ + key |
 
-The keys are Rectangle's: arrows for the halves, U I J K for the corners, D F G for the thirds, E and T for the two thirds, C to center, ↩ to maximize, ⌫ to restore, - and = to resize, ↑ for maximize height and ⌃⌥⌘ arrows for the displays.
-**Shortcuts start off.** You pick a set in the Windows tab, and every action has a switch of its own next to its chord.
+The keys are Rectangle's: arrows for the halves, U I J K for the corners, D F G for the thirds, E and T for the two thirds, C to center, ↩ to maximize, ⌫ to restore, - and = to resize, ⌃⌥⇧↑ for maximize height and ⌃⌥⌘ arrows for the displays.
+Almost Maximize and Center Half have no default shortcut, as in Rectangle.
+The alternate set has no chord in common with the Rectangle set, so the two apps can run side by side.
+**The Rectangle set is on from the first launch.** You can pick the other set or turn the shortcuts off in the Windows tab, and a right-click on a command switches its shortcut off.
 
 ### When another window manager runs
 
@@ -273,7 +277,7 @@ Quitting only ever happens on that click, and it is an ordinary quit, the same a
 
 Measured on macOS 26: `RegisterEventHotKey` answers `eventHotKeyExistsErr` only for a chord the **same process** already holds.
 Two apps may claim one chord, both are told "registered", and both then answer the key.
-So the per-binding dot in the shortcut table is green for a chord this build really claimed, orange while a known window manager is running on Rectangle's own layout (both apps may answer), grey when the action is off, and red when macOS refused the chord outright.
+So the Windows tab shows one summary ("21 of 21 shortcuts are live") with a dot: green when this build claimed every chord, orange while a known window manager is running on Rectangle's own layout (both apps may answer), and red when macOS refused a chord outright.
 
 ### Permissions
 
@@ -670,7 +674,7 @@ Nothing here can be proved by a test or a screenshot: a global shortcut needs a 
 - [ ] Quit Rectangle and turn its launch at login off. In Vent's Windows tab pick **Rectangle layout**, and every dot in the shortcut table goes green.
 - [ ] Put a window in front of Vent and press ⌃⌥←, ⌃⌥→, ⌃⌥↩ and ⌃⌥⌫. The window halves, halves the other way, maximizes and comes back where it started.
 - [ ] Press ⌃⌥← twice more: the half becomes two thirds and then one third, and the ladder starts over after two seconds.
-- [ ] With Rectangle running again, the banner names it with its version, **Use Vent's alternate set** switches the table to ⌃⌥⇧, and those chords move a window with Rectangle still on its own set.
+- [ ] With Rectangle running again, the banner names it with its version, **Use Vent's alternate set** switches the list to ⌃⌥⇧⌘, and those chords move a window with Rectangle still on its own set.
 - [ ] Move the Keyboard Backlight slider and watch the keyboard: the light follows within a moment, F5 and F6 keep working, and the slider follows them back.
 - [ ] Switch **Auto brightness** off and on in the tab, and `ventctl backlight get` agrees with the switch both times. Leave it the way you found it.
 - [ ] Turn Keep Awake on for 30 minutes: `pmset -g assertions | grep Vent` shows `PreventUserIdleSystemSleep` with a timeout, the header badge counts down, and `kill -9` of Vent takes the assertion with it.
