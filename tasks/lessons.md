@@ -20,3 +20,19 @@ Rules from user corrections. Review at session start.
 - The R8 agent left two background loops with `until ! pgrep -f "measure_idle.sh"`. The pattern also matches the loop's own command line, so the loops ran for hours and the agent looked active.
 - Rule: wait on a pid (`while kill -0 <pid>`), a pid file or `pgrep -x <name>`. Never use `pgrep -f` with a text that is in the waiting command.
 - Rule: when a batch ends, check for leftover processes of the session and stop them.
+
+## A callback from a system framework is on an unknown thread
+
+- The backlight slider crashed the app: the CoreBrightness block ran on a background queue and the code used `MainActor.assumeIsolated`. No test saw it, because no test made a real write, and only a write makes the notification arrive.
+- Rule: `assumeIsolated` is only for callbacks whose thread is documented as main (a main-queue observer, a main run loop timer). All other framework blocks hop with `DispatchQueue.main.async`.
+- Rule: each feature that writes to hardware gets a self-test that makes one real write and restores the value, and I run it before I say "done".
+
+## A feature that is off by default is a feature that does not work
+
+- The window shortcuts were off until the user selected a set in a tab. The user quit Rectangle, pressed the shortcuts, and nothing occurred.
+- Rule: the default is the state that the user expects after the install. Turn a feature off by default only when it is dangerous, and then show the switch where the user looks first.
+
+## Ask what "works" means for the user before the design
+
+- Keep Awake used an idle-sleep assertion. The user's reference was `sudo pmset disablesleep 1`, which also keeps the Mac awake with the lid closed. The two are different features.
+- Rule: when the user has a tool or command that they use today, the feature must do at least what that does.
