@@ -88,6 +88,23 @@ struct PopoverTools: View {
                     ForEach(KeepAwakeDuration.presets, id: \.self) { duration in
                         Button(duration.title) { keepAwake.setDuration(duration) }
                     }
+                    // The two options ride in the same menu, so the popover
+                    // can do everything the tab can without a second row.
+                    Divider()
+                    Toggle("Keep the display on", isOn: Binding(
+                        get: { keepAwake.options.keepDisplayOn },
+                        set: { keepAwake.setKeepDisplayOn($0) }
+                    ))
+                    Toggle(
+                        keepAwake.lidNeedsReinstall
+                            ? "Stay awake with the lid closed (reinstall the helper)"
+                            : "Stay awake with the lid closed",
+                        isOn: Binding(
+                            get: { keepAwake.options.lidClose },
+                            set: { keepAwake.setLidClose($0) }
+                        )
+                    )
+                    .disabled(keepAwake.lidNeedsReinstall)
                 }
                 .menuStyle(.button)
                 .buttonStyle(.bordered)

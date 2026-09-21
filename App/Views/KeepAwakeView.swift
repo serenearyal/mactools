@@ -25,6 +25,10 @@ struct KeepAwakeView: View {
                 }
                 .help("How long the assertion lasts before it releases itself")
 
+                // Directly under the main switch: it is the option people come
+                // to this tab for, and under "Options" it was below the fold.
+                lidToggle
+
                 status
             } header: {
                 Text("Sleep")
@@ -42,7 +46,6 @@ struct KeepAwakeView: View {
             Section {
                 Toggle("Keep the display on", isOn: displayBinding)
                     .help("Also hold a display-sleep assertion, so the screen stays lit")
-                lidToggle
                 Toggle("Use the battery guard", isOn: guardBinding)
                     .help("Release the assertion when the charge falls to the threshold")
                 Stepper(
