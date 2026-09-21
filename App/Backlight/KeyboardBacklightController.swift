@@ -150,6 +150,49 @@ final class KeyboardBacklightController {
         )
     }
 
+    /// `--backlight-selftest`: one real write, the way the slider makes it,
+    /// then the old value goes back. The first write is what makes
+    /// CoreBrightness deliver its first notification, on a queue of its own,
+    /// so this is the run that proves the callback path does not trap.
+    func selfTest(completion: @escaping @MainActor (Bool) -> Void) {
+        guard isAvailable else {
+            AppLog.app.notice("backlight selftest: SKIP, no keyboard backlight")
+            completion(true)
+            return
+        }
+        if !observingStarted {
+            observingStarted = engine.startObserving { [weak self] in
+                self?.engine.poll()
+                self?.publish()
+            }
+        }
+        engine.poll()
+        let original = engine.reading.level
+        let target = original < 0.5 ? BacklightScale.nextUp(from: original) : BacklightScale.nextDown(from: original)
+        slide(to: target)
+        commit()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
+            engine.poll()
+            let reached = abs(engine.reading.level - target) < 0.04
+            let keys = engine.observedKeys.sorted().joined(separator: ",")
+            slide(to: original)
+            commit()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+                engine.poll()
+                let restored = abs(engine.reading.level - original) < 0.04
+                AppLog.app.notice(
+                    """
+                    backlight selftest: \(reached && restored ? "PASS" : "FAIL", privacy: .public), \
+                    \(original, privacy: .public) -> \(target, privacy: .public) reached \(reached, privacy: .public), \
+                    restored \(restored, privacy: .public), auto \(self.engine.reading.isAuto, privacy: .public), \
+                    notifications [\(keys, privacy: .public)]
+                    """
+                )
+                completion(reached && restored)
+            }
+        }
+    }
+
     private func publish() {
         level = engine.level
         reading = engine.reading

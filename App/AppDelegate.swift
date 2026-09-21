@@ -317,6 +317,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if arguments.contains("--backlight-probe") {
             services.backlight.probe()
         }
+        // `--backlight-selftest`: one ladder step and back through the slider
+        // path, then quit. The exit code is the verdict.
+        if arguments.contains("--backlight-selftest") {
+            services.backlight.selfTest { passed in
+                exit(passed ? 0 : 1)
+            }
+        }
         // `--shortcut-set off|rectangle|alternate`: claim one set for this run
         // and write nothing back. It is how a run proves which chords another
         // app already owns, without pressing a key.
