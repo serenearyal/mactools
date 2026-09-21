@@ -22,7 +22,7 @@ protocol BacklightClient: AnyObject {
     func isDimmed(_ keyboard: UInt64) -> Bool
     /// False when the framework offers no usable change notification, which is
     /// the signal to fall back to polling while the slider is on screen.
-    func observe(keyboard: UInt64, onChange: @escaping (String) -> Void) -> Bool
+    func observe(keyboard: UInt64, onChange: @escaping @MainActor @Sendable (String) -> Void) -> Bool
     func stopObserving()
 }
 

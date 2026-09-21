@@ -165,7 +165,12 @@ final class KeyboardBacklightClient: BacklightClient {
     /// the controller keeps its 1 Hz fallback until a notification really
     /// arrives, because a registration that silently delivers nothing would
     /// otherwise freeze the slider.
-    func observe(keyboard: UInt64, onChange: @escaping (String) -> Void) -> Bool {
+    ///
+    /// The framework calls the block on a queue of its own, never on the main
+    /// thread, so the block hops. `assumeIsolated` here crashed the app on the
+    /// first slider move: the write itself is what makes the first
+    /// notification arrive.
+    func observe(keyboard: UInt64, onChange: @escaping @MainActor @Sendable (String) -> Void) -> Bool {
         guard !observing else { return true }
         guard let (object, selector, imp) = implementation(
             "registerNotificationForKeys:keyboardID:block:"
@@ -173,7 +178,7 @@ final class KeyboardBacklightClient: BacklightClient {
         let keys = KeyboardBacklightClient.notificationKeys as NSArray
         let block: @convention(block) (NSString, Any?) -> Void = { key, _ in
             let name = key as String
-            MainActor.assumeIsolated { onChange(name) }
+            DispatchQueue.main.async { onChange(name) }
         }
         unsafeBitCast(imp, to: Register.self)(object, selector, keys, keyboard, block)
         observing = true

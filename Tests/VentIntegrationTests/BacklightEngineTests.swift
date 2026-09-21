@@ -45,7 +45,7 @@ struct BacklightEngineTests {
         func isSuppressed(_ keyboard: UInt64) -> Bool { suppressed }
         func isDimmed(_ keyboard: UInt64) -> Bool { dimmed }
 
-        func observe(keyboard: UInt64, onChange: @escaping (String) -> Void) -> Bool {
+        func observe(keyboard: UInt64, onChange: @escaping @MainActor @Sendable (String) -> Void) -> Bool {
             isObserving = observeSucceeds
             return observeSucceeds
         }
