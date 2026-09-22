@@ -43,15 +43,20 @@ targets:
           copyFiles:
             destination: wrapper
             subpath: Contents/Library/LaunchDaemons
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleIconFile: MacTools
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        CFBundleDisplayName: MacTools
+        NSHumanReadableCopyright: ""
     settings:
       base:
         PRODUCT_NAME: MacTools
         PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.mactools
         CODE_SIGN_ENTITLEMENTS: App/MacTools.entitlements
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_LSUIElement: YES
-        INFOPLIST_KEY_NSHumanReadableCopyright: ""
-        INFOPLIST_KEY_CFBundleDisplayName: MacTools
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "4"
         COMBINE_HIDPI_IMAGES: YES
