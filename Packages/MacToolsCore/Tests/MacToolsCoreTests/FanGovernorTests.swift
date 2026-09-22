@@ -200,7 +200,8 @@ func governorReadFailure() {
     hardware.failReadFans("the SMC is not answering")
     hardware.clearCalls()
 
-    governor.setMode(.constant(rpm: 3000), forFan: 0, now: 0)
+    // Nothing was written, and the reply says why instead of claiming success.
+    #expect(governor.setMode(.constant(rpm: 3000), forFan: 0, now: 0) == "the SMC is not answering")
 
     #expect(hardware.calls == [.readFans])
     #expect(governor.snapshot().readError == "the SMC is not answering")
@@ -240,4 +241,91 @@ func governorRestoreClearsSuspension() {
     governor.setMode(.constant(rpm: 2500), forFan: 0, now: 20)
     #expect(hardware.fans[0].manual == true)
     #expect(hardware.fans[0].target == 2500)
+}
+
+@Test("a curve leaves the fan to the firmware below its start temperature")
+func governorCurveBelowStart() {
+    let hardware = InMemoryFanHardware.macBookPro()
+    hardware.setTemperature(50, forKey: "Tp01")
+    let (governor, _) = makeGovernor(hardware: hardware)
+
+    governor.setMode(.curve(sensorKey: "Tp01", startTemp: 60, maxTemp: 85), forFan: 0, now: 0)
+    #expect(hardware.fans[0].manual == false)
+    #expect(!hardware.calls.contains { if case .setManual = $0 { true } else { false } })
+    #expect(governor.isActive == true)
+    let snapshot = governor.snapshot()
+    #expect(snapshot.fans[0].mode == .curve(sensorKey: "Tp01", startTemp: 60, maxTemp: 85))
+    #expect(snapshot.fans[0].sensorCelsius == 50)
+    #expect(snapshot.fault(forFan: 0) == nil)
+
+    // Idle below the start reads the sensor and writes nothing.
+    hardware.clearCalls()
+    governor.tick(now: 2)
+    #expect(hardware.calls == [.readFans, .readTemperature("Tp01")])
+}
+
+@Test("a curve takes the fan at its start and lets it go a little below it")
+func governorCurveReleaseBand() {
+    let hardware = InMemoryFanHardware.macBookPro()
+    hardware.setTemperature(50, forKey: "Tp01")
+    let (governor, _) = makeGovernor(hardware: hardware)
+    governor.setMode(.curve(sensorKey: "Tp01", startTemp: 60, maxTemp: 85), forFan: 0, now: 0)
+
+    hardware.setTemperature(60, forKey: "Tp01")
+    governor.tick(now: 2)
+    #expect(hardware.fans[0].manual == true)
+    #expect(hardware.fans[0].target == 1200)
+
+    // Inside the release band the curve keeps the fan.
+    hardware.setTemperature(59, forKey: "Tp01")
+    governor.tick(now: 4)
+    #expect(hardware.fans[0].manual == true)
+
+    hardware.setTemperature(Double(60) - Fans.curveReleaseCelsius, forKey: "Tp01")
+    governor.tick(now: 6)
+    #expect(hardware.fans[0].manual == false)
+    #expect(hardware.fans[0].target == 0)
+
+    // Back above the start the curve takes the fan again, at once.
+    hardware.setTemperature(70, forKey: "Tp01")
+    governor.tick(now: 8)
+    #expect(hardware.fans[0].manual == true)
+    #expect(abs(hardware.fans[0].target - (1200 + (5779 - 1200) * 10 / 25)) < 0.5)
+}
+
+@Test("a wake lifts the sleep hold even when the wish went away during the sleep")
+func governorWakeAfterWishDropped() {
+    let hardware = InMemoryFanHardware.macBookPro()
+    hardware.setTemperature(70, forKey: "Tp01")
+    let (governor, _) = makeGovernor(hardware: hardware)
+    governor.setMode(.curve(sensorKey: "Tp01", startTemp: 45, maxTemp: 85), forFan: 0, now: 0)
+    governor.suspend()
+
+    // A client sets Auto during a dark wake. Nothing is desired any more.
+    governor.setMode(.auto, forFan: 0, now: 2)
+    #expect(governor.desiredModes.isEmpty)
+
+    // The wake path with nothing desired writes nothing, and ends the hold.
+    hardware.clearCalls()
+    governor.reapplyDesired(now: 10)
+    #expect(hardware.calls == [.readFans])
+
+    governor.setMode(.constant(rpm: 2500), forFan: 0, now: 12)
+    #expect(hardware.fans[0].manual == true)
+    #expect(hardware.fans[0].target == 2500)
+}
+
+@Test("the fake fans stand still in Auto, like Apple silicon at idle")
+func fakeFansIdleAtZero() {
+    let hardware = InMemoryFanHardware.macBookPro()
+    #expect(hardware.fans.allSatisfy { $0.actual == 0 })
+
+    try? hardware.setManual(fan: 0, rpm: 2400)
+    hardware.advance(seconds: 2)
+    #expect(hardware.fans[0].actual == 1200)
+    #expect(hardware.fans[1].actual == 0)
+
+    try? hardware.setAuto(fan: 0)
+    hardware.advance(seconds: 4)
+    #expect(hardware.fans[0].actual == 0)
 }

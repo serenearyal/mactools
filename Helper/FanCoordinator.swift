@@ -159,7 +159,7 @@ final class FanCoordinator: Sendable {
                     repeating: Fans.tickSeconds,
                     leeway: .milliseconds(200)
                 )
-                source.setEventHandler { [weak self] in self?.governor.tick() }
+                source.setEventHandler { [weak self] in self?.tick() }
                 source.resume()
                 current = source
             } else if !wanted, let source = current {
@@ -167,5 +167,14 @@ final class FanCoordinator: Sendable {
                 current = nil
             }
         }
+    }
+
+    /// A tick can hand the last forced fan back to the firmware on its own,
+    /// when a write or a sensor fails, and then nothing else would stop the
+    /// timer. A curve below its start keeps its wish, so the governor stays
+    /// active and the timer keeps running, which is what brings the fan back.
+    private func tick() {
+        governor.tick()
+        if !governor.isActive { updateTimer() }
     }
 }

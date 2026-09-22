@@ -61,14 +61,16 @@ public final class FanGovernor: Sendable {
             state.faults[index] = nil
             // The cached setpoint belongs to the mode that is going away.
             state.written[index] = nil
-            step(&state, now: now)
+            // Nothing was written when the fans could not be read, and that
+            // is not a success.
+            guard step(&state, now: now) else { return state.faults[index] ?? state.readError }
             return state.faults[index]
         }
     }
 
     /// One control step: read, decide, write.
     public func tick(now: Double = MonotonicTime.seconds) {
-        state.withLock { step(&$0, now: now) }
+        state.withLock { _ = step(&$0, now: now) }
     }
 
     /// Hands every fan back to the firmware and forgets every wish.
@@ -102,7 +104,9 @@ public final class FanGovernor: Sendable {
     /// Writes every held mode again, whatever the cache says.
     ///
     /// The SMC forgets the forced mode across a sleep, so the wake path cannot
-    /// trust "we already wrote that".
+    /// trust "we already wrote that". It also ends the sleep hold, and must run
+    /// on every wake that follows a `suspend`, even when no wish is left: a
+    /// client may have set Auto during a dark wake.
     public func reapplyDesired(now: Double = MonotonicTime.seconds) {
         state.withLock { state in
             state.suspended = false
@@ -146,14 +150,18 @@ public final class FanGovernor: Sendable {
 
     // MARK: - The loop
 
-    private func step(_ state: inout State, now: Double) {
+    /// False when the fans could not be read, so nothing was decided.
+    @discardableResult
+    private func step(_ state: inout State, now: Double) -> Bool {
         // Nothing can be decided without the limits and the current mode.
-        guard readFans(into: &state), !state.suspended else { return }
+        guard readFans(into: &state) else { return false }
+        guard !state.suspended else { return true }
 
         let engaged = state.interlock.update(hottestDie: hottestDie())
         for fan in state.fans {
             apply(fan: fan, interlockEngaged: engaged, now: now, &state)
         }
+        return true
     }
 
     /// A `do`/`catch` inside a `withLock` closure catches `any Error`, because
@@ -228,6 +236,16 @@ public final class FanGovernor: Sendable {
                 maxTemp: maxTemp
             ) else {
                 fail(fan: index, reason: "the curve for sensor \(key) is not usable", &state)
+                return
+            }
+            let holding = state.written[index] != nil
+            guard FanCurve.holdsFan(temp: temperature, start: start, wasHolding: holding) else {
+                // Below the start the firmware has the fan. The wish, the
+                // reading and the temperature memory stay.
+                restore(fan: index, hardwareMode: fan.mode, &state)
+                smoother.releaseSetpoint()
+                state.smoothers[index] = smoother
+                state.sensorCelsius[index] = raw
                 return
             }
             let target = smoother.slew(toward: curved, now: now)

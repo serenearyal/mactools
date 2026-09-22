@@ -512,7 +512,7 @@ private struct CurveEditor: View {
                 temperatureRow(
                     value: startBinding,
                     range: guardedRange(20, curve.maxTemp - 1),
-                    caption: "fan at minimum below this"
+                    caption: "macOS controls the fan below this"
                 )
             }
             GridRow(alignment: .firstTextBaseline) {
@@ -669,6 +669,18 @@ private struct CurvePlot: View {
                             .monospacedDigit()
                             .foregroundStyle(Color.secondary)
                     }
+                } else {
+                    PointMark(
+                        x: .value("Now", clampedTemperature(temperature)),
+                        y: .value("Speed", fan.minimumRPM)
+                    )
+                    .symbolSize(0)
+                    .annotation(position: .topTrailing, spacing: 4) {
+                        Text("\(Fmt.temperature(temperature, unit: settings.temperatureUnit)) · macOS")
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .foregroundStyle(Color.secondary)
+                    }
                 }
             }
         }
@@ -703,8 +715,9 @@ private struct CurvePlot: View {
         min(max(value, domain.lowerBound), domain.upperBound)
     }
 
+    /// nil below the start, where the firmware has the fan.
     private var resultingRPM: Double? {
-        guard let temperature else { return nil }
+        guard let temperature, temperature >= curve.startTemp else { return nil }
         return FanCurve.targetRPM(
             temp: temperature,
             min: fan.minimumRPM,
@@ -715,9 +728,10 @@ private struct CurvePlot: View {
     }
 
     /// The ramp drawn as the governor would compute it, so the picture cannot
-    /// drift away from the code that moves the fan.
+    /// drift away from the code that moves the fan. It starts at the start
+    /// temperature: below it macOS has the fan and there is no line to draw.
     private var points: [(temp: Double, rpm: Double)] {
-        stride(from: domain.lowerBound, through: domain.upperBound, by: 0.5).compactMap { temp in
+        stride(from: curve.startTemp, through: domain.upperBound, by: 0.5).compactMap { temp in
             FanCurve.targetRPM(
                 temp: temp,
                 min: fan.minimumRPM,

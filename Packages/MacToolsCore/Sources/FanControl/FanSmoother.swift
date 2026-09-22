@@ -28,6 +28,14 @@ public struct FanSmoother: Sendable, Equatable {
         return held
     }
 
+    /// Forgets the last setpoint, so the next `slew` starts from the target.
+    /// The temperature memory stays: it is what keeps a curve that let a fan
+    /// go from taking it back at once.
+    public mutating func releaseSetpoint() {
+        lastTarget = nil
+        lastTime = nil
+    }
+
     /// The setpoint to write, limited to `Fans.slewRPMPerSecond`.
     ///
     /// The first call after a mode change jumps straight to the target: the

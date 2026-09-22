@@ -47,3 +47,34 @@ public enum FanUnlockStrategy {
         }
     }
 }
+
+/// Remembers `Ftst = 1` so it can be taken back.
+///
+/// Nothing in the SMC writes `Ftst` back to 0 by itself. The flag goes when the
+/// last fan the helper forced is back in Auto, and not before, because the
+/// other fans may still need it.
+public struct ForceTargetsLatch: Sendable, Equatable {
+    private var forced: Set<Int> = []
+    public private(set) var isSet = false
+
+    public init() {}
+
+    /// Before the unlock, so a fan that is half forced still counts.
+    public mutating func forcing(fan index: Int) {
+        forced.insert(index)
+    }
+
+    public mutating func forceTargetsWritten() {
+        isSet = true
+    }
+
+    /// True when `Ftst` is set and no forced fan is left: write 0 now.
+    public mutating func release(fan index: Int) -> Bool {
+        forced.remove(index)
+        return isSet && forced.isEmpty
+    }
+
+    public mutating func forceTargetsCleared() {
+        isSet = false
+    }
+}

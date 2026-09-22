@@ -5,15 +5,16 @@ import Synchronization
 /// The real fans, over the SMC. Only the privileged helper ever builds one:
 /// every write here comes back as `SMCError.notPrivileged` without root.
 ///
-/// Every write is read back. The SMC accepts a write to a key it will not act
-/// on, and a fan that silently stayed in Auto while the UI said "2500 rpm"
-/// would be the worst kind of bug in this app.
+/// Every write that decides what the fan does is read back. The SMC accepts a
+/// write to a key it will not act on, and a fan that silently stayed in Auto
+/// while the UI said "2500 rpm" would be the worst kind of bug in this app.
 public final class SMCFanHardware: FanHardware, FanUnlockHardware, Sendable {
     private let smc: SMCConnection
     private let capabilities: FanCapabilities
     /// Key info is fixed for the life of the machine, and a cached one saves a
     /// driver round trip per read.
     private let keyInfo = Mutex<[SMCFourCC: SMCKeyInfo]>([:])
+    private let forceTargets = Mutex(ForceTargetsLatch())
 
     /// The largest difference between a written and a read-back setpoint that
     /// still counts as the same value: `flt ` is a 32-bit float, and the SMC
@@ -72,13 +73,22 @@ public final class SMCFanHardware: FanHardware, FanUnlockHardware, Sendable {
     }
 
     public func setAuto(fan index: Int) throws(FanHardwareError) {
+        // The mode is what hands the fan back, so it is read back. The
+        // firmware leaves that key alone, and the read-back returns at once.
         try write(0, fan: index, suffix: capabilities.modeSuffix ?? FanKeys.mode)
         // The target follows the mode: a stale setpoint left in `F%dTg` is
         // what makes a fan jump back to it the next time anything forces it.
-        try? write(0, fan: index, suffix: FanKeys.target)
+        // Not read back: in Auto the firmware writes its own setpoint there,
+        // so a read-back would wait out the whole timeout, with the governor
+        // lock held, for a value it will never see.
+        try? write(0, fan: index, suffix: FanKeys.target, verify: false)
+        if forceTargets.withLock({ $0.release(fan: index) }) {
+            clearForceTargets()
+        }
     }
 
     public func setManual(fan index: Int, rpm: Double) throws(FanHardwareError) {
+        forceTargets.withLock { $0.forcing(fan: index) }
         try FanUnlockStrategy.enableManualMode(fan: index, using: self) { seconds in
             Thread.sleep(forTimeInterval: seconds)
         }
@@ -97,6 +107,15 @@ public final class SMCFanHardware: FanHardware, FanUnlockHardware, Sendable {
         } catch {
             throw FanHardwareError("cannot set \(FanKeys.forceTargets): \(error.description)")
         }
+        forceTargets.withLock { $0.forceTargetsWritten() }
+    }
+
+    /// `Ftst = 0`, best effort: it runs on the way back to Auto, where the fan
+    /// itself is already safe. A failure keeps the latch set, so the next
+    /// fan that goes back to Auto tries again.
+    private func clearForceTargets() {
+        guard (try? smc.write(.number(0), to: FanKeys.forceTargets)) != nil else { return }
+        forceTargets.withLock { $0.forceTargetsCleared() }
     }
 
     // MARK: - Keys
@@ -140,8 +159,14 @@ public final class SMCFanHardware: FanHardware, FanUnlockHardware, Sendable {
     }
 
     /// Writes and reads back. A value the SMC did not take is an error, not a
-    /// silent no-op.
-    private func write(_ value: Double, fan index: Int, suffix: String) throws(FanHardwareError) {
+    /// silent no-op. `verify: false` skips the read-back, for a key the
+    /// firmware is known to overwrite.
+    private func write(
+        _ value: Double,
+        fan index: Int,
+        suffix: String,
+        verify: Bool = true
+    ) throws(FanHardwareError) {
         let key = try key(fan: index, suffix: suffix)
         let info = try info(for: key)
         guard let payload = info.type.encode(.number(value)) else {
@@ -152,6 +177,7 @@ public final class SMCFanHardware: FanHardware, FanUnlockHardware, Sendable {
         } catch {
             throw FanHardwareError("cannot write \(key): \(error.description)")
         }
+        guard verify else { return }
         // The SMC applies a write asynchronously: on the M1 Pro `F0Tg` still
         // reads the old setpoint right after a write that did take. Poll for
         // the new value before calling it refused.

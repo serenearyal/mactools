@@ -20,6 +20,11 @@ public enum Fans {
     /// A falling temperature must fall this far before the curve follows it.
     public static let hysteresisCelsius: Double = 0.5
 
+    /// A curve that holds a fan keeps it until the sensor is this far below
+    /// the start temperature, so a sensor that sits at the start does not
+    /// hand the fan to the firmware and back on every tick.
+    public static let curveReleaseCelsius: Double = 2
+
     /// How fast a curve may move its setpoint. A constant speed is not slewed:
     /// the user asked for an exact number and a ramp would feel broken.
     public static let slewRPMPerSecond: Double = 200

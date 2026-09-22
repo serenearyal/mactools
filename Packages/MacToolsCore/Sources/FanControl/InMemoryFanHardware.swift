@@ -16,10 +16,12 @@ public final class InMemoryFanHardware: FanHardware, Sendable {
         public var target: Double
         public var manual: Bool
 
-        public init(minimum: Double, maximum: Double, actual: Double? = nil) {
+        /// `actual` starts at 0: an Apple silicon fan in Auto stands still
+        /// until the firmware needs it, below its own minimum.
+        public init(minimum: Double, maximum: Double, actual: Double = 0) {
             self.minimum = minimum
             self.maximum = maximum
-            self.actual = actual ?? minimum
+            self.actual = actual
             target = 0
             manual = false
         }
@@ -90,12 +92,14 @@ public final class InMemoryFanHardware: FanHardware, Sendable {
     }
 
     /// Moves every fan a step towards its setpoint, the way a real one would.
-    /// Only the `--fake-fans` path uses it; the tests assert on setpoints.
+    /// A fan in Auto spins down to 0, like an idle Apple silicon fan under the
+    /// firmware. Only the `--fake-fans` path uses it; the tests assert on
+    /// setpoints.
     public func advance(seconds: Double) {
         state.withLock { state in
             for index in state.fans.indices {
                 let fan = state.fans[index]
-                let goal = fan.manual ? fan.target : fan.minimum
+                let goal = fan.manual ? fan.target : 0
                 let step = min(abs(goal - fan.actual), 600 * seconds)
                 state.fans[index].actual = fan.actual + (goal > fan.actual ? step : -step)
             }

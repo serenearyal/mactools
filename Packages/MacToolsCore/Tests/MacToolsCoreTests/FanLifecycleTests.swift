@@ -55,6 +55,18 @@ func powerPolicyWithoutModes() {
     #expect(policy.hasPoweredOn(hasDesiredMode: true) == .reapplyDesired)
 }
 
+@Test("a wake after a parked sleep reapplies even when the wish is gone")
+func powerPolicyWishDroppedDuringSleep() {
+    var policy = FanPowerPolicy()
+    #expect(policy.willSleep(hasDesiredMode: true) == .restoreAuto)
+    // A client set Auto during a dark wake. The governor still holds the
+    // fans for the sleep, and only the reapply lifts that.
+    #expect(policy.hasPoweredOn(hasDesiredMode: false) == .reapplyDesired)
+    // The next wake of an idle machine is quiet again.
+    #expect(policy.willSleep(hasDesiredMode: false) == .nothing)
+    #expect(policy.hasPoweredOn(hasDesiredMode: false) == .nothing)
+}
+
 // MARK: - The Ftst unlock path
 
 private final class UnlockFake: FanUnlockHardware, @unchecked Sendable {
@@ -120,4 +132,26 @@ func unlockGivesUp() {
     }
     #expect(slept <= FanUnlockStrategy.retryWindowSeconds)
     #expect(hardware.modeWrites > 1)
+}
+
+@Test("Ftst is cleared only when the last forced fan is back in Auto")
+func forceTargetsLatch() {
+    var latch = ForceTargetsLatch()
+    latch.forcing(fan: 0)
+    latch.forcing(fan: 1)
+    latch.forceTargetsWritten()
+    #expect(latch.release(fan: 0) == false)
+    #expect(latch.release(fan: 1) == true)
+    latch.forceTargetsCleared()
+    #expect(latch.isSet == false)
+
+    // A machine that never needed Ftst never writes it.
+    latch.forcing(fan: 0)
+    #expect(latch.release(fan: 0) == false)
+
+    // A clear that failed is tried again on the next fan back to Auto.
+    latch.forcing(fan: 1)
+    latch.forceTargetsWritten()
+    #expect(latch.release(fan: 1) == true)
+    #expect(latch.release(fan: 1) == true)
 }

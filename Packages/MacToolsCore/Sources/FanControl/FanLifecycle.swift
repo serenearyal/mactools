@@ -46,6 +46,9 @@ public enum FanPowerAction: Sendable, Equatable {
 /// rewrite would silently leave a curve doing nothing.
 public struct FanPowerPolicy: Sendable, Equatable {
     private var asleep = false
+    /// True between a sleep that parked the fans and the next wake. The wake
+    /// must end that hold even when the wish is gone by then.
+    private var parked = false
 
     public init() {}
 
@@ -53,13 +56,18 @@ public struct FanPowerPolicy: Sendable, Equatable {
         // macOS can send the message twice for one sleep.
         guard !asleep else { return .nothing }
         asleep = true
+        parked = hasDesiredMode
         return hasDesiredMode ? .restoreAuto : .nothing
     }
 
     /// `hasDesiredMode` is asked again on wake, because the fans were put into
-    /// Auto but the wish itself was kept.
+    /// Auto but the wish itself was kept. A client may also have set Auto
+    /// during a dark wake, so a parked sleep always ends in a reapply, which
+    /// is what lifts the governor's sleep hold.
     public mutating func hasPoweredOn(hasDesiredMode: Bool) -> FanPowerAction {
+        let wasParked = parked
         asleep = false
-        return hasDesiredMode ? .reapplyDesired : .nothing
+        parked = false
+        return hasDesiredMode || wasParked ? .reapplyDesired : .nothing
     }
 }
