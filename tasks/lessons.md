@@ -48,3 +48,14 @@ Rules from user corrections. Review at session start.
 - The user's long-running Vent made WindowServer use about 37 points of CPU (43.6 % with it, 7.2 % without it). I saw that only because I stopped it for a measurement, and then the evidence was gone: a new instance did not show the load in 12 different states.
 - Rule: when a process looks guilty, first run `sample <pid> 5`, save its window list and its state file, and only then stop it.
 - Rule: an efficiency budget for a menu bar app includes WindowServer, not only the app's own CPU. `scripts/measure_idle.sh` must record the WindowServer delta.
+
+## A fan fix is proven on the real fans, with the user's settings
+
+- The first curve fix gave the fan to macOS below the start, and I reported the bug as fixed from unit tests and a fake fan. On the real Mac, macOS kept a fan that had been spinning at about 40 % for minutes, so the user still heard it.
+- Rule: "Auto" and "off" are different. A fake fan that idles at 0 in Auto proves nothing about what the firmware does after a forced run.
+- Rule: before I say a fan behaviour is fixed, I watch `mactoolsctl fans` on the real Mac in the user's mode for a few minutes, or I ask the user for that one check and say that it is still open.
+
+## A guard must not block the user's own switch
+
+- Keep Awake refused to turn on at 3 % battery, because the battery guard also covered the switch. The user saw a switch that did not work.
+- Rule: a safety guard that exists for a forgotten state steps aside for an explicit user action and arms again later. Only a real hazard (heat) refuses a switch.
