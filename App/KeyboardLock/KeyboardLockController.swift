@@ -150,7 +150,10 @@ final class KeyboardLockController {
                 ?? settings.lockTimeoutSeconds
         )
         let runner = EventTapRunner { [weak self] in
-            // The tap thread calls this. Everything below is main-actor work.
+            // The tap thread calls this once the runner has stopped the tap on
+            // its own, so the keyboard is already free. What is left is the
+            // state and the overlay, which are main-actor work; `unlock` does
+            // nothing when another path got there first.
             Task { @MainActor in self?.unlock(reason: .chord) }
         }
         do {

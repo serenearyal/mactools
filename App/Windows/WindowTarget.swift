@@ -80,10 +80,16 @@ struct WindowTarget {
     /// `AXFocusedWindow` is what the user is typing in. An app that has no
     /// focused window (every window closed, or a menu bar app) still has a main
     /// window or a window list, and the first of those is what the user sees.
+    ///
+    /// An app that does not answer the first read is not asked twice: the
+    /// fallbacks would each wait out the timeout again.
     static func capture(pid: pid_t) -> WindowTarget? {
         guard pid > 0 else { return nil }
         let application = AXUIElementCreateApplication(pid)
-        let window = AX.element(application, AXAttribute.focusedWindow)
+        AX.limitTimeout(application)
+        let focused = AX.read(application, AXAttribute.focusedWindow)
+        guard focused.error != .cannotComplete else { return nil }
+        let window = AX.asElement(focused.value)
             ?? AX.element(application, AXAttribute.mainWindow)
             ?? AX.elements(application, AXAttribute.windows).first
         guard let window else { return nil }
@@ -100,7 +106,12 @@ struct WindowTarget {
     }
 
     /// Reads every value off an element that is already in hand.
-    static func make(window: AXUIElement, pid: pid_t) -> WindowTarget {
+    ///
+    /// Nil when the app does not answer the first read, so a hung app costs
+    /// one short timeout instead of ten of them.
+    static func make(window: AXUIElement, pid: pid_t) -> WindowTarget? {
+        AX.limitTimeout(window)
+        guard AX.read(window, AXAttribute.position).error != .cannotComplete else { return nil }
         let app = NSRunningApplication(processIdentifier: pid)
         let axFrame = AX.frame(window) ?? .zero
         let frame = AXGeometry.fromAX(axFrame, primaryFrame: ScreenList.primaryFrame)
@@ -131,6 +142,7 @@ struct WindowTarget {
     /// Every window of one app, for `mactoolsctl window list` and the self test.
     static func windows(of pid: pid_t) -> [WindowTarget] {
         let application = AXUIElementCreateApplication(pid)
-        return AX.elements(application, AXAttribute.windows).map { make(window: $0, pid: pid) }
+        AX.limitTimeout(application)
+        return AX.elements(application, AXAttribute.windows).compactMap { make(window: $0, pid: pid) }
     }
 }

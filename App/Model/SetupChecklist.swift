@@ -187,6 +187,9 @@ final class SetupChecklist {
     func refresh() {
         hasFullDiskAccess = FullDiskAccess.isGranted()
         lock.refreshPermissions()
+        // The window manager keeps its own copy of the Accessibility grant, and
+        // its tab would go on asking for a grant the user just gave.
+        AppServices.shared.windows.refreshAccessibility()
         launchAtLogin.refresh()
         Task { await helper.refresh() }
     }

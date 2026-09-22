@@ -78,7 +78,17 @@ final class AXWindowMover {
             if action != .restore {
                 restoreMemory.remember(current, for: live)
             }
-            let applied = write(intended, to: live, screen: screen, gap: gap, workaround: enhancedUserInterfaceWorkaround)
+            // A refused size is pinned inside the display the window is going
+            // to, not the one it came from: "Next Display" and a restore onto
+            // another display would otherwise be clamped straight back.
+            let destination = ScreenList.screen(containing: intended) ?? screen
+            let applied = write(
+                intended,
+                to: live,
+                screen: destination,
+                gap: gap,
+                workaround: enhancedUserInterfaceWorkaround
+            )
             if action == .restore { restoreMemory.forget(live) }
             // The ladder has to follow the window that refused the frame it
             // was given, otherwise the next press looks like a fresh one.
@@ -258,6 +268,7 @@ final class AXWindowMover {
             return
         }
         let application = AXUIElementCreateApplication(pid)
+        AX.limitTimeout(application)
         let wasOn = AX.bool(application, AXAttribute.enhancedUserInterface) ?? false
         if wasOn {
             AX.setBool(application, AXAttribute.enhancedUserInterface, false)

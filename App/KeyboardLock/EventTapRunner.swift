@@ -23,7 +23,8 @@ enum EventTapFailure: Error, Equatable {
 /// references behind `lock`, which the tap thread, the watchdog queue and the
 /// main thread all take.
 final class EventTapRunner: @unchecked Sendable {
-    /// Called from the tap thread when the Escape chord completes.
+    /// Called from the tap thread when the Escape chord completes, after the
+    /// tap is already stopped.
     private let onChord: @Sendable () -> Void
     private let log = AppLog.lock
 
@@ -57,7 +58,8 @@ final class EventTapRunner: @unchecked Sendable {
         let created = OSAllocatedUnfairLock(initialState: false)
         let thread = Thread { [weak self] in
             guard let self else { return }
-            created.withLock { $0 = install() }
+            let installed = install()
+            created.withLock { $0 = installed }
             ready.signal()
             // `CFRunLoopRun` returns when the source is removed; the flag is
             // the only thing that decides whether the thread is done.
@@ -143,14 +145,29 @@ final class EventTapRunner: @unchecked Sendable {
             return false
         }
         let runLoop = CFRunLoopGetCurrent()
-        CFRunLoopAddSource(runLoop, source, .commonModes)
-        CGEvent.tapEnable(tap: port, enable: true)
 
-        lock.withLock {
+        // A `start()` that gave up waiting has already called `stop()`, which
+        // found nothing to tear down. A tap stored or enabled after that would
+        // hold the keyboard with nobody to release it, so the check, the
+        // enable and the store are one step under the lock that `stop()`
+        // takes. Callbacks only arrive through this run loop, and this thread
+        // holds the runner strongly for as long as the loop runs, so the
+        // unretained `userInfo` never outlives it.
+        let installed = lock.withLock { () -> Bool in
+            guard !stopping else { return false }
+            CFRunLoopAddSource(runLoop, source, .commonModes)
+            CGEvent.tapEnable(tap: port, enable: true)
             machPort = port
             self.source = source
             self.runLoop = runLoop
             chord = UnlockChord()
+            return true
+        }
+        guard installed else {
+            CGEvent.tapEnable(tap: port, enable: false)
+            CFMachPortInvalidate(port)
+            log.notice("tap discarded, the lock was cancelled while it was created")
+            return false
         }
         return true
     }
@@ -193,6 +210,10 @@ final class EventTapRunner: @unchecked Sendable {
         let complete = lock.withLock { chord.registerEscape(at: now) }
         guard complete else { return }
         log.notice("escape chord completed")
+        // Released here, on the tap thread, before anything is asked of the
+        // main thread: a main thread that is busy must not keep the keyboard
+        // locked after the user asked for it back.
+        stop()
         onChord()
     }
 

@@ -39,7 +39,7 @@ final class KeyboardBacklightClient: BacklightClient {
     private typealias SetFloat = @convention(c) (AnyObject, Selector, Float, UInt64) -> Bool
     private typealias SetBool = @convention(c) (AnyObject, Selector, Bool, UInt64) -> Bool
     private typealias Register = @convention(c) (
-        AnyObject, Selector, NSArray, UInt64, @convention(block) (NSString, Any?) -> Void
+        AnyObject, Selector, NSArray, UInt64, @convention(block) @Sendable (NSString, Any?) -> Void
     ) -> Void
 
     private static let frameworkPath =
@@ -169,14 +169,16 @@ final class KeyboardBacklightClient: BacklightClient {
     /// The framework calls the block on a queue of its own, never on the main
     /// thread, so the block hops. `assumeIsolated` here crashed the app on the
     /// first slider move: the write itself is what makes the first
-    /// notification arrive.
+    /// notification arrive. The block is `@Sendable` for the same reason: a
+    /// plain closure written in a main-actor class inherits the isolation, and
+    /// Swift 6 traps when it is then called off the main thread.
     func observe(keyboard: UInt64, onChange: @escaping @MainActor @Sendable (String) -> Void) -> Bool {
         guard !observing else { return true }
         guard let (object, selector, imp) = implementation(
             "registerNotificationForKeys:keyboardID:block:"
         ) else { return false }
         let keys = KeyboardBacklightClient.notificationKeys as NSArray
-        let block: @convention(block) (NSString, Any?) -> Void = { key, _ in
+        let block: @convention(block) @Sendable (NSString, Any?) -> Void = { key, _ in
             let name = key as String
             DispatchQueue.main.async { onChange(name) }
         }

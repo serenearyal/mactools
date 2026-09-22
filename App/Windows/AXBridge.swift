@@ -35,12 +35,35 @@ enum AXAttribute {
 ///
 /// Nothing above this file speaks `CFTypeRef`.
 enum AX {
-    static func value(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
+    /// How long one call may wait for another app, in seconds.
+    ///
+    /// The system default is about six seconds, and every call here runs on
+    /// the main thread: one hung app would freeze the menu bar for a minute
+    /// across the ten reads a capture does. A healthy app answers in a few
+    /// milliseconds.
+    static let messagingTimeout: Float = 0.3
+
+    /// Puts the short timeout on one element. It belongs to the element, not
+    /// to the app, so every element that is read from is given it first.
+    static func limitTimeout(_ element: AXUIElement) {
+        AXUIElementSetMessagingTimeout(element, messagingTimeout)
+    }
+
+    /// One read with its error, for the callers that stop when the app does
+    /// not answer (`.cannotComplete`) instead of asking it again.
+    static func read(_ element: AXUIElement, _ attribute: String) -> (value: CFTypeRef?, error: AXError) {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
-            return nil
-        }
-        return value
+        let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+        return (error == .success ? value : nil, error)
+    }
+
+    static func value(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
+        read(element, attribute).value
+    }
+
+    static func asElement(_ raw: CFTypeRef?) -> AXUIElement? {
+        guard let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+        return (raw as! AXUIElement)
     }
 
     static func string(_ element: AXUIElement, _ attribute: String) -> String? {
@@ -52,10 +75,7 @@ enum AX {
     }
 
     static func element(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {
-        guard let raw = value(element, attribute),
-              CFGetTypeID(raw) == AXUIElementGetTypeID()
-        else { return nil }
-        return (raw as! AXUIElement)
+        asElement(value(element, attribute))
     }
 
     static func elements(_ element: AXUIElement, _ attribute: String) -> [AXUIElement] {
