@@ -238,14 +238,13 @@ public final class FanGovernor: Sendable {
                 fail(fan: index, reason: "the curve for sensor \(key) is not usable", &state)
                 return
             }
-            let holding = state.written[index] != nil
-            guard FanCurve.holdsFan(temp: temperature, start: start, wasHolding: holding) else {
-                // Below the start the firmware has the fan. The wish, the
-                // reading and the temperature memory stay.
-                restore(fan: index, hardwareMode: fan.mode, &state)
+            let spinning = (state.written[index] ?? 0) > 0
+            guard FanCurve.spinsFan(temp: temperature, start: start, wasSpinning: spinning) else {
+                // Below the start the fan is off. The ramp starts again from
+                // its first point when the sensor comes back up.
                 smoother.releaseSetpoint()
                 state.smoothers[index] = smoother
-                state.sensorCelsius[index] = raw
+                write(target: 0, fan: fan, &state)
                 return
             }
             let target = smoother.slew(toward: curved, now: now)

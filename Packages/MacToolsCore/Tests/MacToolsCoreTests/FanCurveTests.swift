@@ -59,10 +59,10 @@ func curveNaN() {
     #expect(FanCurve.targetRPM(temp: .infinity, min: 1200, max: 5000, start: 45, maxTemp: 85) == nil)
 }
 
-@Test("a curve holds a fan from its start and lets go below the release band")
-func curveHoldsFan() {
-    #expect(FanCurve.holdsFan(temp: 59.9, start: 60, wasHolding: false) == false)
-    #expect(FanCurve.holdsFan(temp: 60, start: 60, wasHolding: false) == true)
-    #expect(FanCurve.holdsFan(temp: 58.5, start: 60, wasHolding: true) == true)
-    #expect(FanCurve.holdsFan(temp: 60 - Fans.curveReleaseCelsius, start: 60, wasHolding: true) == false)
+@Test("a curve spins a fan from its start and stops it below the release band")
+func curveSpinsFan() {
+    #expect(FanCurve.spinsFan(temp: 59.9, start: 60, wasSpinning: false) == false)
+    #expect(FanCurve.spinsFan(temp: 60, start: 60, wasSpinning: false) == true)
+    #expect(FanCurve.spinsFan(temp: 58.5, start: 60, wasSpinning: true) == true)
+    #expect(FanCurve.spinsFan(temp: 60 - Fans.curveReleaseCelsius, start: 60, wasSpinning: true) == false)
 }

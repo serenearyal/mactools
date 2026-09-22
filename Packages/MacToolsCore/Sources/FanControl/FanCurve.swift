@@ -35,16 +35,15 @@ public enum FanCurve {
         return minimum + (maximum - minimum) * fraction
     }
 
-    /// True when the curve should hold the fan, false when the firmware
-    /// should have it.
+    /// True when the fan should spin on the ramp, false when it should be off.
     ///
-    /// Below the start temperature the fan belongs to the firmware, which
-    /// can stop it: the minimum of an Apple silicon fan is about 1200 rpm,
-    /// so a curve that held it there would keep a cool Mac audible. A curve
-    /// that holds the fan lets go only `Fans.curveReleaseCelsius` below the
-    /// start.
-    public static func holdsFan(temp: Double, start: Double, wasHolding: Bool) -> Bool {
-        if wasHolding { return temp > start - Fans.curveReleaseCelsius }
+    /// Below the start temperature the fan is held at 0 rpm. Handing it to
+    /// the firmware there is not the same: macOS keeps a fan that was
+    /// spinning at about 40 % for minutes (measured on an M1 Pro), so the
+    /// start would not mean "quiet until here". A spinning fan stops only
+    /// `Fans.curveReleaseCelsius` below the start.
+    public static func spinsFan(temp: Double, start: Double, wasSpinning: Bool) -> Bool {
+        if wasSpinning { return temp > start - Fans.curveReleaseCelsius }
         return temp >= start
     }
 }

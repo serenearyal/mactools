@@ -243,15 +243,15 @@ func governorRestoreClearsSuspension() {
     #expect(hardware.fans[0].target == 2500)
 }
 
-@Test("a curve leaves the fan to the firmware below its start temperature")
+@Test("a curve holds the fan off below its start temperature")
 func governorCurveBelowStart() {
     let hardware = InMemoryFanHardware.macBookPro()
     hardware.setTemperature(50, forKey: "Tp01")
     let (governor, _) = makeGovernor(hardware: hardware)
 
     governor.setMode(.curve(sensorKey: "Tp01", startTemp: 60, maxTemp: 85), forFan: 0, now: 0)
-    #expect(hardware.fans[0].manual == false)
-    #expect(!hardware.calls.contains { if case .setManual = $0 { true } else { false } })
+    #expect(hardware.fans[0].manual == true)
+    #expect(hardware.fans[0].target == 0)
     #expect(governor.isActive == true)
     let snapshot = governor.snapshot()
     #expect(snapshot.fans[0].mode == .curve(sensorKey: "Tp01", startTemp: 60, maxTemp: 85))
@@ -264,7 +264,7 @@ func governorCurveBelowStart() {
     #expect(hardware.calls == [.readFans, .readTemperature("Tp01")])
 }
 
-@Test("a curve takes the fan at its start and lets it go a little below it")
+@Test("a curve starts the fan at its start and stops it a little below it")
 func governorCurveReleaseBand() {
     let hardware = InMemoryFanHardware.macBookPro()
     hardware.setTemperature(50, forKey: "Tp01")
@@ -276,17 +276,17 @@ func governorCurveReleaseBand() {
     #expect(hardware.fans[0].manual == true)
     #expect(hardware.fans[0].target == 1200)
 
-    // Inside the release band the curve keeps the fan.
+    // Inside the release band the fan keeps spinning.
     hardware.setTemperature(59, forKey: "Tp01")
     governor.tick(now: 4)
-    #expect(hardware.fans[0].manual == true)
+    #expect(hardware.fans[0].target == 1200)
 
     hardware.setTemperature(Double(60) - Fans.curveReleaseCelsius, forKey: "Tp01")
     governor.tick(now: 6)
-    #expect(hardware.fans[0].manual == false)
+    #expect(hardware.fans[0].manual == true)
     #expect(hardware.fans[0].target == 0)
 
-    // Back above the start the curve takes the fan again, at once.
+    // Back above the start the ramp applies again, at once.
     hardware.setTemperature(70, forKey: "Tp01")
     governor.tick(now: 8)
     #expect(hardware.fans[0].manual == true)

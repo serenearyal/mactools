@@ -33,7 +33,7 @@ commands:
   fan-status   print the fan state the helper sees
   fan-auto     hand one fan, or every fan, back to the firmware
   fan-set      force one fan to a constant speed
-  fan-probe    report what this machine's SMC allows on the fan keys
+  fan-probe    force fan 0 to a speed (default 2500) and report what the SMC does
   selftest-fans  run the gentle live fan sequence with a temperature guard
 
 The helper restores Auto as soon as its last client disconnects, so a bare
@@ -286,8 +286,14 @@ do {
         }
         try FanCommands.setConstant(index: index, rpm: rpm, hold: hold)
     case "fan-probe":
-        try withoutOptions()
-        try FanProbe.run()
+        guard tail.count <= 1 else { throw CLIError("'fan-probe' takes at most one speed, for example 'sudo mactoolsctl fan-probe 0'") }
+        let rpm = try tail.first.map { text in
+            guard let rpm = Int(text), (0...FanProbe.maximumRPM).contains(rpm) else {
+                throw CLIError("'fan-probe' takes a speed from 0 to \(FanProbe.maximumRPM) rpm")
+            }
+            return rpm
+        } ?? FanProbe.defaultRPM
+        try FanProbe.run(rpm: rpm)
     case "selftest-fans", "selftest":
         try withoutOptions()
         try FanCommands.selftest()

@@ -512,7 +512,7 @@ private struct CurveEditor: View {
                 temperatureRow(
                     value: startBinding,
                     range: guardedRange(20, curve.maxTemp - 1),
-                    caption: "macOS controls the fan below this"
+                    caption: "fan off below this"
                 )
             }
             GridRow(alignment: .firstTextBaseline) {
@@ -644,7 +644,9 @@ private struct CurvePlot: View {
 
     var body: some View {
         Chart {
-            ForEach(points, id: \.temp) { point in
+            // By position: the start temperature is there twice, at 0 and at
+            // the minimum, which is what draws the step.
+            ForEach(Array(points.enumerated()), id: \.offset) { _, point in
                 LineMark(
                     x: .value("Temperature", point.temp),
                     y: .value("Speed", point.rpm)
@@ -672,11 +674,12 @@ private struct CurvePlot: View {
                 } else {
                     PointMark(
                         x: .value("Now", clampedTemperature(temperature)),
-                        y: .value("Speed", fan.minimumRPM)
+                        y: .value("Speed", 0)
                     )
-                    .symbolSize(0)
+                    .symbolSize(70)
+                    .foregroundStyle(MetricColor.temperature(temperature))
                     .annotation(position: .topTrailing, spacing: 4) {
-                        Text("\(Fmt.temperature(temperature, unit: settings.temperatureUnit)) · macOS")
+                        Text("\(Fmt.temperature(temperature, unit: settings.temperatureUnit)) · off")
                             .font(.caption2)
                             .monospacedDigit()
                             .foregroundStyle(Color.secondary)
@@ -685,7 +688,7 @@ private struct CurvePlot: View {
             }
         }
         .chartXScale(domain: domain)
-        .chartYScale(domain: fan.rpmRange)
+        .chartYScale(domain: 0...fan.rpmRange.upperBound)
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 5)) {
                 AxisGridLine()
@@ -695,7 +698,7 @@ private struct CurvePlot: View {
             }
         }
         .chartYAxis {
-            AxisMarks(position: .leading, values: [fan.minimumRPM, fan.maximumRPM]) {
+            AxisMarks(position: .leading, values: [0, fan.minimumRPM, fan.maximumRPM]) {
                 AxisGridLine()
                 AxisValueLabel(format: CurvePlot.wholeNumber)
                     .font(.caption2)
@@ -715,7 +718,7 @@ private struct CurvePlot: View {
         min(max(value, domain.lowerBound), domain.upperBound)
     }
 
-    /// nil below the start, where the firmware has the fan.
+    /// nil below the start, where the fan is off.
     private var resultingRPM: Double? {
         guard let temperature, temperature >= curve.startTemp else { return nil }
         return FanCurve.targetRPM(
@@ -728,10 +731,11 @@ private struct CurvePlot: View {
     }
 
     /// The ramp drawn as the governor would compute it, so the picture cannot
-    /// drift away from the code that moves the fan. It starts at the start
-    /// temperature: below it macOS has the fan and there is no line to draw.
+    /// drift away from the code that moves the fan. Below the start the fan
+    /// is off, so the line runs along 0 and steps up to the minimum there.
     private var points: [(temp: Double, rpm: Double)] {
-        stride(from: curve.startTemp, through: domain.upperBound, by: 0.5).compactMap { temp in
+        let off = stride(from: domain.lowerBound, to: curve.startTemp, by: 0.5).map { (temp: $0, rpm: 0.0) }
+        return off + [(temp: curve.startTemp, rpm: 0)] + stride(from: curve.startTemp, through: domain.upperBound, by: 0.5).compactMap { temp in
             FanCurve.targetRPM(
                 temp: temp,
                 min: fan.minimumRPM,

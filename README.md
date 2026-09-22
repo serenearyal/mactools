@@ -62,7 +62,7 @@ There is no account, no analytics and no network access.
 
 ## Good to know
 
-- **Fan control is your responsibility.** MacTools refuses speeds below the fan's minimum and takes over at 100 °C, but a fan held too low can still make your Mac throttle.
+- **Fan control is your responsibility.** MacTools refuses speeds below the fan's minimum (a sensor-based curve turns the fans off below its start temperature) and gives the fans back to macOS at 100 °C, but a fan held too low can still make your Mac throttle.
 - **A Mac that stays awake with the lid closed gets hot in a bag.** MacTools lets it sleep again when the battery is low or the Mac is hot.
 - **Already use Rectangle?** Both apps answer the same shortcuts. Quit one of them, or pick the alternate shortcut set in the Windows tab.
 

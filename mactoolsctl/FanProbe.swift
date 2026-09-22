@@ -3,13 +3,18 @@ import Foundation
 import SMCKit
 
 /// A root-only diagnostic that talks to the SMC directly, with no helper in
-/// between: force fan 0 to 2500 rpm, print what the mode, target and actual
+/// between: force fan 0 to a speed (2500 rpm unless one is given, and 0 is
+/// allowed, to see if the SMC holds a fan stopped), print what the mode, target and actual
 /// keys read back over time, then hand the fan back. It answers how long the
-/// SMC takes to show a written setpoint. Run it as `sudo mactoolsctl fan-probe`.
+/// SMC takes to show a written setpoint. Run it as `sudo mactoolsctl fan-probe [rpm]`.
 enum FanProbe {
+    static let defaultRPM = 2500
+    /// Above the maximum of any Apple silicon fan; the SMC clamps to its own.
+    static let maximumRPM = 8000
+
     nonisolated(unsafe) private static var interruptSource: DispatchSourceSignal?
 
-    static func run() throws {
+    static func run(rpm: Int) throws {
         guard geteuid() == 0 else { throw CLIError("'fan-probe' writes to the SMC; run it with sudo") }
         let smc = try SMCConnection()
         // Every labelled CPU sensor, finite values only; it throws when none
@@ -44,7 +49,7 @@ enum FanProbe {
         line("before", since: start)
         try smc.write(.number(1), to: "F0Md")
         line("mode written", since: start)
-        try smc.write(.number(2500), to: "F0Tg")
+        try smc.write(.number(Double(rpm)), to: "F0Tg")
         line("target written", since: start)
         for step in 1...80 {
             Thread.sleep(forTimeInterval: step <= 20 ? 0.05 : 0.2)
