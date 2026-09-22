@@ -135,9 +135,20 @@ final class ProcessStore {
     /// same reason the CPU baselines do, and it drops a window it cannot
     /// honestly average when the gap is longer than the window itself.
     @ObservationIgnored private var energy = AppEnergyWindow()
+    /// When the last pass landed. The rows survive a stop, so a count of
+    /// passes alone cannot tell a table from a second ago from one from this
+    /// morning.
+    @ObservationIgnored private var lastSample: ContinuousClock.Instant?
+    /// Passes since the loop last started. The first one after a stop is an
+    /// average over the whole gap, so it does not count as a pair.
+    @ObservationIgnored private var loopPasses = 0
 
     /// The Battery tab shows ten rows.
     private static let energyAppLimit = 10
+
+    /// The oldest table a report prints as it is. Twice the popover's five
+    /// second cadence: a running loop always has a pass younger than this.
+    private static let reportableAge = Duration.seconds(10)
 
     /// The uid of this process. Its rows can be signalled without the helper.
     static let currentUID = getuid()
@@ -162,8 +173,13 @@ final class ProcessStore {
     ///
     /// Two passes, not one: the first pass has no CPU baseline to subtract, so
     /// its whole CPU column is nil and a report made from it would say nothing
-    /// about load at all.
-    var hasReportableSample: Bool { sampleCount >= 2 && !derived.all.isEmpty }
+    /// about load at all. And recent ones, from a loop that is still running:
+    /// the rows outlive a stop, and a report would otherwise put the
+    /// processes of hours ago next to a system line read just now.
+    var hasReportableSample: Bool {
+        guard task != nil, loopPasses >= 2, !derived.all.isEmpty, let lastSample else { return false }
+        return lastSample.duration(to: .now) <= ProcessStore.reportableAge
+    }
 
     // MARK: - Cadence
 
@@ -186,6 +202,7 @@ final class ProcessStore {
             // `.utility`, and the libproc pass itself runs on the feed actor:
             // the main actor only ever sees the finished sample.
             let feed = feed
+            loopPasses = 0
             task = Task.detached(priority: .utility) { [weak self] in
                 while !Task.isCancelled {
                     let sample = await feed.sample()
@@ -222,6 +239,8 @@ final class ProcessStore {
 
     private func apply(_ sample: ProcessFeed.Sample) {
         sampleCount += 1
+        loopPasses += 1
+        lastSample = .now
         // Before the rows are derived: the window wants every process, not the
         // slice the user filtered the table down to.
         energy.add(sample.rows)
@@ -258,7 +277,8 @@ final class ProcessStore {
     ///
     /// Those two surfaces can be the first thing the user opens, and the table
     /// only samples while somebody is looking at it, so a report taken there
-    /// would have an empty CPU column. Two passes a second apart is the
+    /// would have an empty CPU column, or a stale one: the first pass after a
+    /// stop averages over the whole gap. Two passes a second apart is the
     /// shortest honest answer; the sleep carries a tolerance so the wakeup can
     /// ride with one the system already has.
     func sampleForReport() async {

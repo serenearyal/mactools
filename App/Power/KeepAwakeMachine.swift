@@ -312,7 +312,8 @@ enum LidSleepRetry {
 /// requests in the same run loop turn cannot reach the worker out of order.
 final class LidSleepReconciler: Sendable {
     /// Called after every pass, on whatever thread the worker runs on. The
-    /// controller hops to the main actor itself.
+    /// controller hops to the main actor itself, and must not wait for the
+    /// hop: see `clearForQuit`.
     typealias Observer = @Sendable (LidSleepOutcome) async -> Void
 
     private struct State {
@@ -369,10 +370,12 @@ final class LidSleepReconciler: Sendable {
     /// exactly how a `set(true)` lands after a `set(false)`.
     ///
     /// The observer goes first. The quit path blocks the main thread while it
-    /// waits for this, and the observer hops to the main actor: with it still
-    /// attached, the worker waited for the thread that was waiting for the
-    /// worker, and every quit sat out its whole timeout before the helper's
-    /// last-client rule cleared the flag instead.
+    /// waits for this, and an observer that waited for the main actor would
+    /// make the worker wait for the thread that was waiting for the worker:
+    /// every quit sat out its whole timeout before the helper's last-client
+    /// rule cleared the flag instead. Detaching it stops a later pass from
+    /// calling it; one pass may already be inside it, which is why the app's
+    /// observer hops to the main actor without waiting for the hop.
     func clearForQuit() async {
         kick {
             $0.observer = nil

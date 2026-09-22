@@ -138,58 +138,59 @@ struct SettingsData: Codable, Equatable, Sendable {
 
     /// Every key is optional, so a settings file written by an older build
     /// keeps the choices it does hold instead of resetting all of them.
+    ///
+    /// And every key is decoded on its own: one value this build does not
+    /// know, a metric or a style a newer build added, costs that one key and
+    /// nothing else. A throw here would make `load` fall back to the defaults,
+    /// and the next write would put them over the fan curves and the
+    /// shortcuts the file still held.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let fallback = SettingsData()
-        menuBarMetrics = try container.decodeIfPresent([MenuBarMetric].self, forKey: .menuBarMetrics)
+        func value<T: Decodable>(_ key: CodingKeys, or fallback: T) -> T {
+            (try? container.decodeIfPresent(T.self, forKey: key)) ?? fallback
+        }
+        // A list keeps the entries it knows rather than dropping them all.
+        menuBarMetrics = (try? container.decodeIfPresent([String].self, forKey: .menuBarMetrics))?
+            .compactMap(MenuBarMetric.init(rawValue:))
             ?? fallback.menuBarMetrics
-        labelStyle = try container.decodeIfPresent(MenuBarLabelStyle.self, forKey: .labelStyle)
-            ?? fallback.labelStyle
-        showMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarIcon)
-            ?? fallback.showMenuBarIcon
-        tintsHotTemperatures = try container.decodeIfPresent(Bool.self, forKey: .tintsHotTemperatures)
-            ?? fallback.tintsHotTemperatures
-        spinsFanIcon = try container.decodeIfPresent(Bool.self, forKey: .spinsFanIcon)
-            ?? fallback.spinsFanIcon
-        menuBarContent = try container.decodeIfPresent(MenuBarContent.self, forKey: .menuBarContent)
-            ?? fallback.menuBarContent
-        refreshInterval = try container.decodeIfPresent(RefreshInterval.self, forKey: .refreshInterval)
-            ?? fallback.refreshInterval
-        temperatureUnit = try container.decodeIfPresent(TemperatureUnit.self, forKey: .temperatureUnit)
-            ?? fallback.temperatureUnit
-        sensorKey = try container.decodeIfPresent(String.self, forKey: .sensorKey) ?? fallback.sensorKey
-        showUnlabelledSensors = try container.decodeIfPresent(Bool.self, forKey: .showUnlabelledSensors)
-            ?? fallback.showUnlabelledSensors
-        lockTimeoutSeconds = LockTimeout.clamp(
-            try container.decodeIfPresent(Int.self, forKey: .lockTimeoutSeconds)
-                ?? fallback.lockTimeoutSeconds
-        )
-        fanModes = try container.decodeIfPresent([String: FanMode].self, forKey: .fanModes)
+        labelStyle = value(.labelStyle, or: fallback.labelStyle)
+        showMenuBarIcon = value(.showMenuBarIcon, or: fallback.showMenuBarIcon)
+        tintsHotTemperatures = value(.tintsHotTemperatures, or: fallback.tintsHotTemperatures)
+        spinsFanIcon = value(.spinsFanIcon, or: fallback.spinsFanIcon)
+        menuBarContent = value(.menuBarContent, or: fallback.menuBarContent)
+        refreshInterval = value(.refreshInterval, or: fallback.refreshInterval)
+        temperatureUnit = value(.temperatureUnit, or: fallback.temperatureUnit)
+        sensorKey = value(.sensorKey, or: fallback.sensorKey)
+        showUnlabelledSensors = value(.showUnlabelledSensors, or: fallback.showUnlabelledSensors)
+        lockTimeoutSeconds = LockTimeout.clamp(value(.lockTimeoutSeconds, or: fallback.lockTimeoutSeconds))
+        // Per fan, for the same reason as the metrics: a mode this build
+        // cannot read is that fan back on Auto, not every curve gone.
+        fanModes = (try? container.decodeIfPresent([String: Lenient<FanMode>].self, forKey: .fanModes))?
+            .compactMapValues(\.value)
             ?? fallback.fanModes
-        setupChecklistDismissed = try container.decodeIfPresent(Bool.self, forKey: .setupChecklistDismissed)
-            ?? fallback.setupChecklistDismissed
-        popoverSection = try container.decodeIfPresent(PopoverSection.self, forKey: .popoverSection)
-            ?? fallback.popoverSection
-        showDockIcon = try container.decodeIfPresent(Bool.self, forKey: .showDockIcon)
-            ?? fallback.showDockIcon
-        menuBarTipShown = try container.decodeIfPresent(Bool.self, forKey: .menuBarTipShown)
-            ?? fallback.menuBarTipShown
-        reportIncludesQuestion = try container.decodeIfPresent(Bool.self, forKey: .reportIncludesQuestion)
-            ?? fallback.reportIncludesQuestion
-        keepAwakeDuration = try container.decodeIfPresent(KeepAwakeDuration.self, forKey: .keepAwakeDuration)
-            ?? fallback.keepAwakeDuration
-        keepAwakeDisplay = try container.decodeIfPresent(Bool.self, forKey: .keepAwakeDisplay)
-            ?? fallback.keepAwakeDisplay
-        keepAwakeLidClose = try container.decodeIfPresent(Bool.self, forKey: .keepAwakeLidClose)
-            ?? fallback.keepAwakeLidClose
-        keepAwakeBatteryGuard = try container.decodeIfPresent(Bool.self, forKey: .keepAwakeBatteryGuard)
-            ?? fallback.keepAwakeBatteryGuard
-        keepAwakeBatteryThreshold = (
-            try container.decodeIfPresent(Int.self, forKey: .keepAwakeBatteryThreshold)
-                ?? fallback.keepAwakeBatteryThreshold
-        ).clamped(to: KeepAwakeOptions.thresholdRange)
-        windows = try container.decodeIfPresent(WindowSettingsData.self, forKey: .windows)
-            ?? fallback.windows
+        setupChecklistDismissed = value(.setupChecklistDismissed, or: fallback.setupChecklistDismissed)
+        popoverSection = value(.popoverSection, or: fallback.popoverSection)
+        showDockIcon = value(.showDockIcon, or: fallback.showDockIcon)
+        menuBarTipShown = value(.menuBarTipShown, or: fallback.menuBarTipShown)
+        reportIncludesQuestion = value(.reportIncludesQuestion, or: fallback.reportIncludesQuestion)
+        keepAwakeDuration = value(.keepAwakeDuration, or: fallback.keepAwakeDuration)
+        keepAwakeDisplay = value(.keepAwakeDisplay, or: fallback.keepAwakeDisplay)
+        keepAwakeLidClose = value(.keepAwakeLidClose, or: fallback.keepAwakeLidClose)
+        keepAwakeBatteryGuard = value(.keepAwakeBatteryGuard, or: fallback.keepAwakeBatteryGuard)
+        keepAwakeBatteryThreshold = value(.keepAwakeBatteryThreshold, or: fallback.keepAwakeBatteryThreshold)
+            .clamped(to: KeepAwakeOptions.thresholdRange)
+        windows = value(.windows, or: fallback.windows)
+    }
+}
+
+/// One entry of a stored collection that decodes to nil instead of throwing,
+/// so a single value this build does not know cannot take the rest with it.
+private struct Lenient<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: Decoder) throws {
+        value = try? Value(from: decoder)
     }
 }
 

@@ -37,7 +37,9 @@ enum PowerSourceReader {
         // "Battery Power", "AC Power" or "UPS Power". The string is the one
         // `pmset` prints, and it is the only source that is right while a
         // laptop charges: a charging battery is not on battery power.
-        if let type = IOPSGetProvidingPowerSourceType(blob)?.takeRetainedValue() as String? {
+        // A Get function: the string belongs to `blob`, so it is not ours to
+        // release.
+        if let type = IOPSGetProvidingPowerSourceType(blob)?.takeUnretainedValue() as String? {
             reading.onBattery = type == kIOPMBatteryPowerKey
         }
         guard let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
@@ -69,6 +71,9 @@ enum PowerSourceReader {
 @MainActor
 final class PowerSourceMonitor {
     private var source: CFRunLoopSource?
+    /// The retained `Box` the C callback gets as its context. Released in
+    /// `stop`, once the source can no longer call back.
+    private var box: UnsafeMutableRawPointer?
     private var thermalObserver: NSObjectProtocol?
     private var lowPowerObserver: NSObjectProtocol?
     private let onChange: (PowerStatus) -> Void
@@ -89,6 +94,7 @@ final class PowerSourceMonitor {
             return
         }
         source = created
+        self.box = box
         CFRunLoopAddSource(CFRunLoopGetMain(), created, .defaultMode)
 
         thermalObserver = NotificationCenter.default.addObserver(
@@ -112,7 +118,14 @@ final class PowerSourceMonitor {
     func stop() {
         if let source {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
+            CFRunLoopSourceInvalidate(source)
             self.source = nil
+        }
+        // After the source is gone: the callback runs on the main run loop,
+        // and this is the main actor, so no call can be in flight.
+        if let box {
+            Unmanaged<Box>.fromOpaque(box).release()
+            self.box = nil
         }
         if let thermalObserver {
             NotificationCenter.default.removeObserver(thermalObserver)

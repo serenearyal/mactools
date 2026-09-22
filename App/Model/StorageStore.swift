@@ -220,8 +220,12 @@ final class StorageStore {
     func trash(_ ids: Set<StorageRow.ID>) {
         let victims = rows.filter { ids.contains($0.id) && $0.exists }
         guard !victims.isEmpty else { return }
-        let freed = victims.reduce(0) { $0 + $1.allocated }
         let outcome = TrashService.trash(victims.map(\.path))
+        // Only what actually went: after a partial trash, the rows that
+        // failed are still on disk and still in the cached tally.
+        let freed = victims
+            .filter { outcome.trashed.keys.contains($0.path) }
+            .reduce(0) { $0 + $1.allocated }
         for path in outcome.trashed.keys {
             AppLog.scan.notice("moved to the Trash: \(path, privacy: .private)")
         }

@@ -108,6 +108,46 @@ struct CPUTickMathTests {
     }
 }
 
+@Suite("CPU minimum interval")
+struct CPUMinimumIntervalTests {
+    private func cores(_ count: Int, user: UInt32, idle: UInt32) -> [CPUTicks] {
+        Array(repeating: CPUTicks(user: user, system: 0, idle: idle, nice: 0), count: count)
+    }
+
+    private let topology = CoreTopology(logicalCount: 2, levels: [], kinds: [.performance, .performance])
+
+    @Test("an interval of a tick or two per core is too short to report")
+    func tooShort() {
+        #expect(!CPUTickMath.spansMinimumInterval(from: cores(2, user: 0, idle: 0), to: cores(2, user: 1, idle: 1)))
+        #expect(CPUTickMath.spansMinimumInterval(from: cores(2, user: 0, idle: 0), to: cores(2, user: 10, idle: 10)))
+        // A different processor set cannot be compared, so it must replace
+        // the baseline rather than wait behind it.
+        #expect(CPUTickMath.spansMinimumInterval(from: cores(1, user: 0, idle: 0), to: cores(2, user: 0, idle: 0)))
+    }
+
+    @Test("a pass right after the last one returns nil and keeps the old baseline")
+    func keepsBaseline() throws {
+        let sampler = CPUSampler(topology: topology)
+        #expect(sampler.sample(ticks: cores(2, user: 0, idle: 0)) == nil)
+        // One busy tick per core, a few milliseconds later: 100 % if it counted.
+        #expect(sampler.sample(ticks: cores(2, user: 1, idle: 0)) == nil)
+        // The next pass is measured from the first reading, not the second.
+        let sample = try #require(sampler.sample(ticks: cores(2, user: 25, idle: 75)))
+        #expect(sample.total.busy == 0.25)
+        #expect(sample.cores.count == 2)
+    }
+
+    @Test("the live sampler is nil twice in a row and reports after 300 ms")
+    func liveSampler() async throws {
+        let sampler = CPUSampler()
+        #expect(try sampler.sample() == nil)
+        #expect(try sampler.sample() == nil)
+        try await Task.sleep(for: .milliseconds(300))
+        let sample = try #require(try sampler.sample())
+        #expect((0...1).contains(sample.total.busy))
+    }
+}
+
 @Suite("core topology")
 struct CoreTopologyTests {
     @Test("the kernel numbers the efficiency cores before the performance cores")

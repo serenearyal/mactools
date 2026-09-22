@@ -112,6 +112,27 @@ public enum CPUTickMath {
         )
         return (total, cores)
     }
+
+    /// The fewest ticks per core an interval has to span before its shares
+    /// mean anything: 20, about 200 ms at the kernel's 100 Hz. A pass that
+    /// lands milliseconds after the last one sees a tick or two per core, and
+    /// one busy tick out of two is a 50 % or 100 % that never happened.
+    public static let minimumTicksPerCore: UInt64 = 20
+
+    /// True when the interval between two readings is long enough to report.
+    /// Readings of different processor sets are "long enough": they cannot be
+    /// compared at all, and the newer one has to become the baseline.
+    public static func spansMinimumInterval(from previous: [CPUTicks], to current: [CPUTicks]) -> Bool {
+        guard previous.count == current.count else { return true }
+        var ticks = UInt64(0)
+        for index in current.indices {
+            ticks += delta(from: previous[index].user, to: current[index].user)
+                + delta(from: previous[index].system, to: current[index].system)
+                + delta(from: previous[index].idle, to: current[index].idle)
+                + delta(from: previous[index].nice, to: current[index].nice)
+        }
+        return ticks >= UInt64(current.count) * minimumTicksPerCore
+    }
 }
 
 /// Per-core CPU load from `host_processor_info(PROCESSOR_CPU_LOAD_INFO)`.
@@ -170,11 +191,26 @@ public final class CPUSampler: Sendable {
 
     /// Usage since the previous call. The first call has nothing to compare
     /// against and returns nil after storing the baseline.
+    ///
+    /// A call too soon after the last one also returns nil, and keeps the old
+    /// baseline, so the next call covers the whole interval instead of a few
+    /// milliseconds of it. See `CPUTickMath.minimumTicksPerCore`.
     public func sample() throws(MetricsError) -> CPUSample? {
         let current = try CPUSampler.readTicks()
+        return sample(ticks: current)
+    }
+
+    /// The baseline half of `sample()`, with the reading passed in, so a test
+    /// can drive it with synthetic ticks.
+    func sample(ticks current: [CPUTicks]) -> CPUSample? {
         let baseline = previous.withLock { stored -> [CPUTicks]? in
-            defer { stored = current }
-            return stored
+            guard let baseline = stored else {
+                stored = current
+                return nil
+            }
+            guard CPUTickMath.spansMinimumInterval(from: baseline, to: current) else { return nil }
+            stored = current
+            return baseline
         }
         guard let baseline, let usage = CPUTickMath.usage(from: baseline, to: current) else {
             return nil

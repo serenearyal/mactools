@@ -101,6 +101,39 @@ public enum DiskIOMath {
             interval: seconds
         )
     }
+
+    /// The traffic of one interval, device by device, added up.
+    ///
+    /// Per device and not on the sum: an ejected disk takes its counters out
+    /// of the total, and a delta of the totals would then go backwards and hide
+    /// the internal SSD's traffic for that interval. A device that is new has
+    /// no baseline and contributes nothing; one that went backwards
+    /// contributes nothing through `delta`.
+    public static func traffic(
+        from previous: [String: DiskIOCounters],
+        to current: [String: DiskIOCounters]
+    ) -> DiskIOCounters {
+        current.reduce(DiskIOCounters.zero) { sum, device in
+            guard let before = previous[device.key] else { return sum }
+            let now = device.value
+            return sum + DiskIOCounters(
+                bytesRead: delta(from: before.bytesRead, to: now.bytesRead),
+                bytesWritten: delta(from: before.bytesWritten, to: now.bytesWritten),
+                reads: delta(from: before.reads, to: now.reads),
+                writes: delta(from: before.writes, to: now.writes)
+            )
+        }
+    }
+
+    /// Throughput between two per-device readings, or nil when the interval
+    /// is not positive.
+    public static func rates(
+        from previous: [String: DiskIOCounters],
+        to current: [String: DiskIOCounters],
+        seconds: Double
+    ) -> DiskIORates? {
+        rates(from: .zero, to: traffic(from: previous, to: current), seconds: seconds)
+    }
 }
 
 /// Block-device throughput from the IORegistry. Readable without root.
@@ -109,9 +142,11 @@ public enum DiskIOMath {
 /// in a `Mutex`, like `SMCConnection`. The registry walk is a few
 /// milliseconds, so a lock keeps the API synchronous.
 public final class DiskIOSampler: Sendable {
+    /// One baseline per BSD name, and a monotonic timestamp: a wall clock
+    /// that NTP or the user moves would turn one interval into a spike.
     private struct Reading: Sendable {
-        let counters: DiskIOCounters
-        let timestamp: Double
+        let devices: [String: DiskIOCounters]
+        let timestamp: ContinuousClock.Instant
     }
 
     private let previous: Mutex<Reading?>
@@ -154,13 +189,15 @@ public final class DiskIOSampler: Sendable {
     public func sample() throws(MetricsError) -> DiskIOSample {
         let devices = try DiskIOSampler.readCounters()
         let total = devices.values.reduce(DiskIOCounters.zero, +)
-        let now = Date.timeIntervalSinceReferenceDate
+        let now = ContinuousClock.now
         let baseline = previous.withLock { stored -> Reading? in
-            defer { stored = Reading(counters: total, timestamp: now) }
+            defer { stored = Reading(devices: devices, timestamp: now) }
             return stored
         }
-        let rates = baseline.flatMap {
-            DiskIOMath.rates(from: $0.counters, to: total, seconds: now - $0.timestamp)
+        let rates = baseline.flatMap { baseline in
+            let elapsed = baseline.timestamp.duration(to: now).components
+            let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+            return DiskIOMath.rates(from: baseline.devices, to: devices, seconds: seconds)
         }
         return DiskIOSample(total: total, devices: devices, rates: rates)
     }

@@ -83,9 +83,13 @@ final class KeepAwakeController {
     /// Called once at launch. Reads the battery and subscribes to its pushes.
     func start() {
         // The worker runs on the cooperative pool, so this hops rather than
-        // assuming anything about the thread it is called back on.
+        // assuming anything about the thread it is called back on. It hops
+        // without waiting: the quit path blocks the main thread on the
+        // worker, and a worker parked in `MainActor.run` would hold every quit
+        // for the whole timeout. The hops are made one after another at one
+        // priority, so the main actor still takes them in order.
         reconciler.observe { [weak self] outcome in
-            await MainActor.run { self?.absorb(outcome) }
+            Task { @MainActor in self?.absorb(outcome) }
         }
         let monitor = PowerSourceMonitor { [weak self] reading in
             self?.apply(.power(reading, now: .now))

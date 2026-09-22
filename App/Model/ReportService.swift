@@ -170,13 +170,14 @@ final class ReportService {
 
     /// The memory line above the table.
     ///
-    /// The snapshot when there is one, and one `host_statistics64` call when
-    /// there is not. A copy from the status item menu runs with nothing on
-    /// screen, so the metrics pass is reading the CPU for the menu bar label
-    /// and nothing else - and a report that says "memory 0 B of 0 B used" is
-    /// worse than one that took 50 us to find out.
+    /// One `host_statistics64` call, read now, and the snapshot only when that
+    /// fails. The snapshot keeps the last value of a domain the metrics pass
+    /// stopped reading: a copy from the status item menu runs with nothing on
+    /// screen, the pass reads the CPU for the menu bar label and nothing else,
+    /// and its memory can be from the last time the popover was open. 50 us
+    /// buys a line that is as fresh as the rows under it.
     private var memory: MemorySnapshot? {
-        store.snapshot.memory ?? (try? MemorySampler.sample())
+        (try? MemorySampler.sample()) ?? store.snapshot.memory
     }
 
     // MARK: - Pasteboard
