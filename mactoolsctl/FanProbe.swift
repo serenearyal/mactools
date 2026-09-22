@@ -12,9 +12,9 @@ enum FanProbe {
     static func run() throws {
         guard geteuid() == 0 else { throw CLIError("'fan-probe' writes to the SMC; run it with sudo") }
         let smc = try SMCConnection()
-        let hottest = ["Tp01", "Tp05", "Tp0D"].compactMap { key -> Double? in
-            SMCFourCC(code: key).flatMap { try? smc.read($0).value.doubleValue }
-        }.max() ?? 0
+        // Every labelled CPU sensor, finite values only; it throws when none
+        // answers, so the guard never passes on a missing reading.
+        let hottest = try FanCommands.hottestCPU()
         guard hottest < 85 else { throw CLIError("the CPU is at \(Int(hottest)) C; not forcing a fan now") }
 
         let restore: @Sendable () -> Void = {

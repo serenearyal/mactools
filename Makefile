@@ -1,4 +1,4 @@
-.PHONY: gen build test install run release dmg pack-dmg notarize clean window-selftest
+.PHONY: gen project build test install run release dmg pack-dmg notarize clean window-selftest
 
 PROJECT      := MacTools.xcodeproj
 SCHEME       := MacTools
@@ -15,13 +15,21 @@ XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(
 gen:
 	xcodegen generate
 
-$(PROJECT):
-	$(MAKE) gen
+# Every build brings the project up to date first. A full generate when the
+# project is missing or older than project.yml; otherwise `--use-cache`, which
+# costs a file listing and regenerates only when the spec or the set of source
+# files changed, so a new file is always in the build.
+project:
+	@if [ -f "$(PROJECT)/project.pbxproj" ] && [ "$(PROJECT)/project.pbxproj" -nt project.yml ]; then \
+		xcodegen generate --use-cache; \
+	else \
+		xcodegen generate; \
+	fi
 
-build: $(PROJECT)
+build: project
 	$(XCODEBUILD) build
 
-test: $(PROJECT)
+test: project
 	swift test --package-path Packages/MacToolsCore
 	$(XCODEBUILD) test
 
@@ -34,10 +42,22 @@ install: build
 	@# An instance that was already running keeps the old binary in memory, and
 	@# `open` on a running app starts nothing. Restart it AFTER the copy, in
 	@# the background, so the user is never left on the build before this one.
-	@pid=$$(pgrep -f "^$(INSTALLED)/Contents/MacOS/MacTools" | head -1); \
+	@# The pattern ends at the binary name, so the root MacToolsHelper, which
+	@# lives in the same folder, never matches, and it is anchored at the
+	@# start, so the shell running this line (whose command line starts with
+	@# /bin/sh) never matches either. Only this user's processes count.
+	@pid=$$(pgrep -u "$$(id -u)" -f "^$(INSTALLED)/Contents/MacOS/MacTools( |$$)" | head -1); \
 	if [ -n "$$pid" ]; then \
 		kill $$pid; \
-		while kill -0 $$pid 2>/dev/null; do /bin/sleep 0.2; done; \
+		waited=0; \
+		while kill -0 $$pid 2>/dev/null && [ $$waited -lt 50 ]; do \
+			/bin/sleep 0.2; waited=$$((waited + 1)); \
+		done; \
+		if kill -0 $$pid 2>/dev/null; then \
+			echo "MacTools did not quit within 10 s; killing it"; \
+			kill -9 $$pid; \
+			/bin/sleep 0.5; \
+		fi; \
 		open -g "$(INSTALLED)"; \
 		echo "restarted the running MacTools in the background"; \
 	fi
@@ -60,13 +80,15 @@ release:
 
 # A disk image with the Release app and an Applications shortcut, plus its
 # SHA-256. `dmg` packs whatever `release` built; `notarize` packs the app
-# after Apple has stapled it, so the two share `pack-dmg`.
+# after Apple has stapled it, so the two share `pack-dmg`. The plain one has
+# its own name, so it can never overwrite the notarized image.
 RELEASE_APP = $(DERIVED)/Build/Products/Release/MacTools.app
 VERSION = $(shell /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$(RELEASE_APP)/Contents/Info.plist" 2>/dev/null || echo dev)
 DMG = $(DERIVED)/MacTools-$(VERSION).dmg
+UNNOTARIZED_DMG = $(DERIVED)/MacTools-$(VERSION)-unnotarized.dmg
 APP_ZIP = $(DERIVED)/MacTools-$(VERSION).zip
 dmg: release
-	$(MAKE) pack-dmg
+	$(MAKE) pack-dmg DMG="$(UNNOTARIZED_DMG)"
 
 pack-dmg:
 	rm -rf "$(DERIVED)/dmg-root" "$(DMG)"

@@ -1,5 +1,6 @@
 import Foundation
 
+import AwakeKit
 import HelperProtocol
 import ReportKit
 import ScanKit
@@ -14,10 +15,10 @@ commands:
   sensors      print the live temperature sensors by category
   fans         print fan state and limits
   power        print the power sensors
-  cpu          print total and per-core CPU usage over one second
+  cpu          print total and per-core CPU usage over one interval
   mem          print the memory breakdown
   disks        print the mounted volumes with their capacity
-  io           print disk I/O throughput over one second
+  io           print disk I/O throughput over one interval
   battery      print the battery: charge, state, cycles, health, watts
   energy       print the apps using the most CPU energy, in watts
   procs        print the process table
@@ -40,8 +41,11 @@ The helper restores Auto as soon as its last client disconnects, so a bare
 'fan-set --hold' keeps this process connected and holds the speed until Ctrl-C.
 
 options:
+  cpu          --interval S     seconds between the two samples (default 1)
+  io           --interval S     seconds between the two samples (default 1)
   procs        --sort cpu|mem   order of the table (default cpu)
                --top N          number of rows (default 15)
+               --interval S     seconds between the two samples (default 1)
                --helper         merge the snapshot of the privileged helper
   energy       --interval S     seconds between the two passes (default 10)
                --top N          number of apps (default 10)
@@ -60,7 +64,8 @@ options:
                --limit N        number of rows (60 processes, 100 files)
   awake        status           list the assertions, SleepDisabled and who set it
                hold <minutes>   hold the same assertion the app takes,
-                                0 for no timeout, Ctrl-C to release
+                                0 for no timeout, at most \(KeepAwakeDuration.maximumMinutes) (a year),
+                                Ctrl-C to release
                lid on|off       set or clear SleepDisabled through the helper,
                                 the lid-close hold the app's switch makes
   backlight    get|ids|auto     read the built-in keyboard backlight
@@ -228,8 +233,12 @@ do {
             guard tail.count <= 1 else { throw CLIError("'awake status' takes no option") }
             try AwakeCommands.status()
         case "hold":
-            guard tail.count == 2, let minutes = Int(tail[1]), minutes >= 0 else {
-                throw CLIError("'awake hold' takes a whole number of minutes, 0 for no timeout")
+            guard tail.count == 2, let minutes = Int(tail[1]),
+                  (0...KeepAwakeDuration.maximumMinutes).contains(minutes) else {
+                throw CLIError(
+                    "'awake hold' takes a whole number of minutes between 0 and "
+                        + "\(KeepAwakeDuration.maximumMinutes) (one year), 0 for no timeout"
+                )
             }
             try AwakeCommands.hold(minutes: minutes)
         case "lid":
@@ -243,6 +252,9 @@ do {
             )
         }
     case "backlight":
+        guard tail.count <= 1 else {
+            throw CLIError("'backlight' takes one of 'get', 'ids' or 'auto'")
+        }
         switch tail.first {
         case "get", nil:
             try BacklightCommands.get()

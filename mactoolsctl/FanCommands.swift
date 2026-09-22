@@ -214,11 +214,13 @@ enum FanCommands {
         try? HelperCommands.restoreAllAuto()
     }
 
-    private static func hottestCPU() throws -> Double {
+    /// The hottest labelled CPU sensor. Throws when no sensor gives a finite
+    /// reading, so a guard built on it never passes on a missing value.
+    static func hottestCPU() throws -> Double {
         let connection = try SMCConnection()
         let keys = SensorNaming.knownTemperatureKeys(in: [.cpuPerformance, .cpuEfficiency])
         let readings = connection.readTemperatures(keys)
-        guard let hottest = readings.map(\.celsius).max() else {
+        guard let hottest = readings.map(\.celsius).filter(\.isFinite).max() else {
             throw CLIError("no CPU sensor is answering, so the temperature guard cannot run")
         }
         return hottest

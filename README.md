@@ -75,7 +75,18 @@ cd mactools
 make install
 ```
 
-You need Xcode 26.
+You need Xcode 26 and a signing certificate: the build refuses ad-hoc signing, because an ad-hoc signature changes on every build and macOS then drops the privacy grants.
+The project is set up for the author's team.
+To sign with your own, create `Config/local.xcconfig` (it is gitignored) before `make install`:
+
+```
+DEVELOPMENT_TEAM = ABCDE12345
+CODE_SIGN_IDENTITY = Apple Development
+CODE_SIGN_IDENTITY[config=Release] = Apple Development
+```
+
+Use your team ID from Xcode > Settings > Accounts, or from `security find-identity -v -p codesigning`.
+The privileged helper only talks to the author's team, so on a build signed by another team the fan control and the helper features stay off; everything else works.
 The architecture, the debug arguments and the test commands are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## License

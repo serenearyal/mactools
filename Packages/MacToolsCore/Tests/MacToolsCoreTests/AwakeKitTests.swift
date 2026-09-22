@@ -20,6 +20,10 @@ func durationPresets() {
         (.minutes(240), 14400),
         (.minutes(0), 0),
         (.minutes(-5), 0),
+        (.minutes(Int.min), 0),
+        (.minutes(KeepAwakeDuration.maximumMinutes), KeepAwakeDuration.maximumMinutes * 60),
+        (.minutes(KeepAwakeDuration.maximumMinutes + 1), KeepAwakeDuration.maximumMinutes * 60),
+        (.minutes(Int.max), KeepAwakeDuration.maximumMinutes * 60),
     ]
 )
 func durationSeconds(duration: KeepAwakeDuration, seconds: Int?) {

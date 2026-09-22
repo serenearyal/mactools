@@ -22,7 +22,7 @@ MacTools is written in Swift 6 and SwiftUI, has no dependencies outside the syst
 ```sh
 brew install xcodegen   # once
 make gen                # regenerate MacTools.xcodeproj from project.yml
-make build              # Debug build into build/
+make build              # bring the project up to date, then a Debug build into build/
 make test               # unit tests and integration tests
 make release            # optimised build, signature check, size
 make install            # build and copy to /Applications/MacTools.app
@@ -30,11 +30,27 @@ make install CONFIG=Release   # the same, from the Release build
 ```
 
 `MacTools.xcodeproj` is generated and is not in git.
+`make build`, `make test` and every target that builds run `xcodegen generate --use-cache` first, so a change to `project.yml` or a new source file is always in the build; it regenerates only when something changed.
 Every target is signed with the one `Apple Development` identity of this machine, and the build fails if that turns into ad-hoc signing.
 
-There is no Developer ID certificate here, so nothing is notarized.
-The Release build runs on this Mac because it was built on it; on any other Mac Gatekeeper refuses it.
-Distribution would need a Developer ID Application certificate and a notarization pass, and neither exists yet.
+The team and the identity are in `Config/Shared.xcconfig`.
+On another Mac, or with another Apple ID, put the overrides in `Config/local.xcconfig`, which is gitignored and included last, so it wins:
+
+```
+DEVELOPMENT_TEAM = ABCDE12345
+CODE_SIGN_IDENTITY = Apple Development
+CODE_SIGN_IDENTITY[config=Release] = Apple Development
+```
+
+The Release line is needed because `CODE_SIGN_IDENTITY[config=Release]` in the shared file is more specific than a plain `CODE_SIGN_IDENTITY`.
+The helper's code requirement names the team `M9Q5YCJ5NU` (`HelperProtocol.teamIdentifier`), so a build signed by another team runs, but the helper refuses it.
+
+After you move or rename the repository folder, run `make clean` once.
+The derived data in `build/` and in `Packages/MacToolsCore/.build` holds absolute paths, and a build against the old paths fails in ways that do not name the cause.
+
+Release builds are signed with the Developer ID Application certificate of team `M9Q5YCJ5NU`.
+`make notarize` sends the app and then the disk image to Apple, staples both tickets and writes `build/MacTools-<version>.dmg`, which Gatekeeper accepts on any Mac.
+`make dmg` packs the same app without notarization, as `MacTools-<version>-unnotarized.dmg`, for a local check only.
 
 ### Install
 

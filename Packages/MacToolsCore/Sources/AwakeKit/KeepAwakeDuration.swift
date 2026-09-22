@@ -16,11 +16,16 @@ public enum KeepAwakeDuration: Sendable, Equatable, Hashable, Codable {
         .minutes(240),
     ]
 
-    /// Nil means no timeout.
+    /// The longest timed hold: one year. A longer one is clamped to it, so
+    /// `seconds` can never overflow, and the CLI refuses more than this.
+    public static let maximumMinutes = 365 * 24 * 60
+
+    /// Nil means no timeout. A negative count is zero and a count above
+    /// `maximumMinutes` is `maximumMinutes`.
     public var seconds: Int? {
         switch self {
         case .indefinite: nil
-        case .minutes(let minutes): max(0, minutes) * 60
+        case .minutes(let minutes): min(max(0, minutes), Self.maximumMinutes) * 60
         }
     }
 
