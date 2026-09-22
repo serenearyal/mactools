@@ -383,17 +383,24 @@ struct KeepAwakeMachineTests {
 
     // MARK: - Refusing on the way in
 
-    @Test("Switching it on below the threshold is refused with a reason")
-    func refusedOnLowBattery() {
+    @Test("Switching it on below the threshold is honoured until the next charge")
+    func switchedOnBelowThreshold() {
         var (machine, backend) = machine(threshold: 20, power: onBattery(12))
         backend.play(machine.handle(.turnOn(now: start)))
+        #expect(machine.state.isOn)
+        #expect(backend.creates.count == 1)
+        #expect(machine.reason == nil)
+
+        // A further drop does not undo the user's own switch.
+        backend.play(machine.handle(.power(onBattery(8), now: start.addingTimeInterval(60))))
+        #expect(machine.state.isOn)
+
+        // After a charge above the threshold the guard watches again.
+        backend.play(machine.handle(.power(plugged(40), now: start.addingTimeInterval(120))))
+        backend.play(machine.handle(.power(onBattery(40), now: start.addingTimeInterval(180))))
+        backend.play(machine.handle(.power(onBattery(19), now: start.addingTimeInterval(240))))
         #expect(machine.state == .off)
-        #expect(backend.creates.isEmpty)
-        #expect(machine.reason == "The battery is at 12 %, at or below the 20 % guard.")
-        // The user's own request was refused, so plugging in does not silently
-        // grant it: the switch is theirs to press again.
-        backend.play(machine.handle(.power(plugged(90), now: start.addingTimeInterval(60))))
-        #expect(machine.state == .off)
+        #expect(machine.reason == "Turned off: the battery fell to 19 %.")
     }
 
     @Test("Switching it on while critically hot is refused with a reason")

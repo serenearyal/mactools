@@ -77,6 +77,11 @@ struct KeepAwakeMachine: Equatable, Sendable {
     /// Only what the guard released may the guard give back: a Keep Awake the
     /// user switched off must not come back when the Mac is plugged in.
     private(set) var releasedByGuard = false
+    /// The user switched Keep Awake on with the charge already at or below the
+    /// threshold. The guard is for a Keep Awake that was forgotten, not for
+    /// one switched on a moment ago, so it steps aside until the Mac is
+    /// plugged in or the charge is above the threshold again.
+    private(set) var guardWaived = false
     /// What the machine last asked the helper for. Not what the system says:
     /// the controller reads that back from the helper and shows it.
     private(set) var lidRequested = false
@@ -110,6 +115,7 @@ struct KeepAwakeMachine: Equatable, Sendable {
             state = .off
             reason = nil
             releasedByGuard = false
+            guardWaived = false
             return [.release, .scheduleExpiry(nil)]
         case .power(let reading, let now):
             power = reading
@@ -118,18 +124,21 @@ struct KeepAwakeMachine: Equatable, Sendable {
     }
 
     private mutating func turnOn(now: Date) -> [Effect] {
-        // The guard has the last word on the way in too: switching Keep Awake
-        // on at 8 % would only be undone a moment later, and a switch that
-        // flips itself back says nothing about why.
+        // Only heat refuses the switch. A low battery does not: the user who
+        // switches Keep Awake on at 8 % can see the battery, and a switch
+        // that will not stay on is worse than a Mac that sleeps a little
+        // later. macOS still sleeps the Mac when the battery runs out.
         let wasOn = state.isOn
-        if let refusal = refusal() {
+        if power.thermal == .critical {
             state = .off
-            reason = refusal
+            reason = "This Mac is too hot to stay awake."
             releasedByGuard = false
+            guardWaived = false
             return wasOn ? [.release, .scheduleExpiry(nil)] : []
         }
         reason = nil
         releasedByGuard = false
+        guardWaived = isAtOrBelowGuard
         return start(now: now, replacing: wasOn)
     }
 
@@ -138,6 +147,7 @@ struct KeepAwakeMachine: Equatable, Sendable {
         state = .off
         reason = nil
         releasedByGuard = false
+        guardWaived = false
         return wasOn ? [.release, .scheduleExpiry(nil)] : []
     }
 
@@ -175,8 +185,11 @@ struct KeepAwakeMachine: Equatable, Sendable {
 
     /// The guard, on every power change and after every option change.
     private mutating func applyGuard(now: Date) -> [Effect] {
+        // The waiver ends once the reason for it is gone, so a later drop is
+        // guarded again.
+        if guardWaived, !isAtOrBelowGuard { guardWaived = false }
         switch BatteryGuard.decide(
-            onBattery: guardsBattery && power.onBattery,
+            onBattery: guardsBattery && power.onBattery && !guardWaived,
             percent: power.percent ?? 100,
             threshold: options.batteryThreshold,
             isOn: state.isOn,
@@ -218,12 +231,10 @@ struct KeepAwakeMachine: Equatable, Sendable {
     // MARK: - Words
 
     /// Why the guard will not hand one out right now, or nil when it will.
-    private func refusal() -> String? {
-        if power.thermal == .critical { return "This Mac is too hot to stay awake." }
-        guard guardsBattery, power.onBattery, let percent = power.percent,
-              percent <= options.batteryThreshold
-        else { return nil }
-        return "The battery is at \(percent) %, at or below the \(options.batteryThreshold) % guard."
+    /// True while the battery guard would release a Keep Awake now.
+    private var isAtOrBelowGuard: Bool {
+        guard guardsBattery, power.onBattery, let percent = power.percent else { return false }
+        return percent <= options.batteryThreshold
     }
 
     private func releaseReason() -> String {
