@@ -6,11 +6,14 @@ MACOSX_DEPLOYMENT_TARGET = 26.0
 SWIFT_VERSION = 6.0
 SWIFT_STRICT_CONCURRENCY = complete
 
-// Manual signing with the one Apple Development identity on this machine.
-// A macOS app that is not sandboxed and claims no restricted entitlement
-// needs no provisioning profile.
+// Manual signing. Debug builds use the Apple Development identity; Release
+// builds, which are what ships in the DMG, use Developer ID so that
+// Gatekeeper accepts them on other Macs once they are notarized (`make
+// notarize`). A macOS app that is not sandboxed and claims no restricted
+// entitlement needs no provisioning profile.
 CODE_SIGN_STYLE = Manual
 CODE_SIGN_IDENTITY = Apple Development
+CODE_SIGN_IDENTITY[config=Release] = Developer ID Application
 PROVISIONING_PROFILE_SPECIFIER =
 
 ENABLE_HARDENED_RUNTIME = YES

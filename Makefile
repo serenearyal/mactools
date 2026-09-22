@@ -56,7 +56,8 @@ release:
 	@echo ""
 	@echo "release app: $(DERIVED)/Build/Products/Release/MacTools.app"
 	@du -sh "$(DERIVED)/Build/Products/Release/MacTools.app" | cut -f1 | xargs echo "size:      "
-	@echo "not notarized: this machine has no Developer ID certificate."
+	@security find-identity -v -p codesigning | grep -q "Developer ID Application" \
+		|| echo "not notarizable: this machine has no Developer ID certificate."
 
 # A disk image with the Release app and an Applications shortcut, plus its
 # SHA-256. Signed with whatever identity the build used: without a Developer
@@ -74,6 +75,19 @@ dmg: release
 	fi
 	shasum -a 256 "$(DMG)" | tee "$(DMG).sha256"
 	@echo "dmg: $(DMG)"
+
+# Sends the disk image to Apple, waits for the verdict and staples the ticket
+# to it, so Gatekeeper opens the app without a network check. Needs the
+# credentials once: `xcrun notarytool store-credentials mactools-notary
+# --apple-id <id> --team-id M9Q5YCJ5NU` (it asks for an app-specific
+# password, made at appleid.apple.com).
+NOTARY_PROFILE = mactools-notary
+notarize: dmg
+	xcrun notarytool submit "$(DMG)" --keychain-profile "$(NOTARY_PROFILE)" --wait
+	xcrun stapler staple "$(DMG)"
+	xcrun stapler validate "$(DMG)"
+	shasum -a 256 "$(DMG)" | tee "$(DMG).sha256"
+	@echo "notarized: $(DMG)"
 
 run: install
 	open "$(INSTALLED)"
