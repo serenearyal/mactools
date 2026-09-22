@@ -7,7 +7,7 @@ The product was renamed from Vent to MacTools on 2026-09-21; older notes use the
 The user wants a native macOS menu bar app that clones Macs Fan Control and adds system metrics.
 Decisions from the user: full fan control (root helper), selectable live metrics in the menu bar, whole-disk largest-files scan (Full Disk Access), native Swift + SwiftUI, and a keyboard lock for cleaning.
 The project is greenfield.
-Location: `/Users/serenearyal/Documents/projects/misc/vent/` with its own git repo.
+Location: `/Users/serenearyal/Documents/projects/misc/mactools/` (was `misc/vent` until 2026-09-22) with its own git repo.
 "Vent" and bundle id `com.serenearyal.vent` are working names and are easy to change.
 Machine: MacBookPro18,3 (M1 Pro), macOS 26.2, Xcode 26.2, Swift 6.2.3, one valid `Apple Development` signing identity, no Developer ID. Team id (certificate OU) is `M9Q5YCJ5NU`; `QG4GX56BVN` in the certificate name is not the team id.
 
