@@ -1,4 +1,4 @@
-.PHONY: gen build test install run release clean window-selftest
+.PHONY: gen build test install run release dmg pack-dmg notarize clean window-selftest
 
 PROJECT      := MacTools.xcodeproj
 SCHEME       := MacTools
@@ -42,10 +42,9 @@ install: build
 		echo "restarted the running MacTools in the background"; \
 	fi
 
-# The shipping build: optimised, hardened runtime, signed with the same Apple
-# Development identity as everything else. There is no Developer ID on this
-# machine, so the result is not notarized and Gatekeeper will refuse it on any
-# other Mac; `make install CONFIG=Release` is how it is used here.
+# The shipping build: optimised, hardened runtime, signed with Developer ID
+# (Config/Shared.xcconfig). Gatekeeper accepts it on other Macs only after
+# `make notarize`; `make install CONFIG=Release` is how it is used here.
 release:
 	$(MAKE) build CONFIG=Release
 	@test -d "$(DERIVED)/Build/Products/Release/MacTools.app" \
@@ -60,14 +59,19 @@ release:
 		|| echo "not notarizable: this machine has no Developer ID certificate."
 
 # A disk image with the Release app and an Applications shortcut, plus its
-# SHA-256. Signed with whatever identity the build used: without a Developer
-# ID certificate it is not notarized, and `release` says so above.
+# SHA-256. `dmg` packs whatever `release` built; `notarize` packs the app
+# after Apple has stapled it, so the two share `pack-dmg`.
+RELEASE_APP = $(DERIVED)/Build/Products/Release/MacTools.app
+VERSION = $(shell /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$(RELEASE_APP)/Contents/Info.plist" 2>/dev/null || echo dev)
 DMG = $(DERIVED)/MacTools-$(VERSION).dmg
-VERSION = $(shell /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$(DERIVED)/Build/Products/Release/MacTools.app/Contents/Info.plist" 2>/dev/null || echo dev)
+APP_ZIP = $(DERIVED)/MacTools-$(VERSION).zip
 dmg: release
+	$(MAKE) pack-dmg
+
+pack-dmg:
 	rm -rf "$(DERIVED)/dmg-root" "$(DMG)"
 	mkdir -p "$(DERIVED)/dmg-root"
-	ditto "$(DERIVED)/Build/Products/Release/MacTools.app" "$(DERIVED)/dmg-root/MacTools.app"
+	ditto "$(RELEASE_APP)" "$(DERIVED)/dmg-root/MacTools.app"
 	ln -s /Applications "$(DERIVED)/dmg-root/Applications"
 	hdiutil create -volname "MacTools" -srcfolder "$(DERIVED)/dmg-root" -ov -format UDZO -quiet "$(DMG)"
 	@if security find-identity -v -p codesigning | grep -q "Developer ID Application"; then \
@@ -76,17 +80,25 @@ dmg: release
 	shasum -a 256 "$(DMG)" | tee "$(DMG).sha256"
 	@echo "dmg: $(DMG)"
 
-# Sends the disk image to Apple, waits for the verdict and staples the ticket
-# to it, so Gatekeeper opens the app without a network check. Needs the
-# credentials once: `xcrun notarytool store-credentials mactools-notary
-# --apple-id <id> --team-id M9Q5YCJ5NU` (it asks for an app-specific
-# password, made at appleid.apple.com).
+# Two round trips to Apple. The app goes first (as a zip) and gets its ticket
+# stapled, so it opens with no network check even after someone drags it out
+# of the image; then the image built around the stapled app goes, and gets
+# its own ticket. Needs the credentials once: `xcrun notarytool
+# store-credentials mactools-notary --apple-id <id> --team-id M9Q5YCJ5NU`
+# (it asks for an app-specific password, made at account.apple.com).
 NOTARY_PROFILE = mactools-notary
-notarize: dmg
+notarize: release
+	rm -f "$(APP_ZIP)"
+	ditto -c -k --keepParent "$(RELEASE_APP)" "$(APP_ZIP)"
+	xcrun notarytool submit "$(APP_ZIP)" --keychain-profile "$(NOTARY_PROFILE)" --wait
+	xcrun stapler staple "$(RELEASE_APP)"
+	xcrun stapler validate "$(RELEASE_APP)"
+	$(MAKE) pack-dmg
 	xcrun notarytool submit "$(DMG)" --keychain-profile "$(NOTARY_PROFILE)" --wait
 	xcrun stapler staple "$(DMG)"
 	xcrun stapler validate "$(DMG)"
 	shasum -a 256 "$(DMG)" | tee "$(DMG).sha256"
+	spctl -a -vv -t open --context context:primary-signature "$(DMG)"
 	@echo "notarized: $(DMG)"
 
 run: install

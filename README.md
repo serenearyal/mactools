@@ -44,10 +44,8 @@ It samples only what is on screen, slows down on battery and in Low Power Mode, 
 3. Click the fan icon in the menu bar.
 
 It needs macOS 26 or later on Apple silicon.
-
-**The current release is not notarized yet.**
-macOS will say it cannot verify the app. To open it once: System Settings > Privacy & Security, scroll down to the message about MacTools, click **Open Anyway** and enter your password.
-Notarized releases are coming; until then you can also [build it yourself](#build-from-source).
+The app is signed with a Developer ID and notarized by Apple, so it opens like any other download.
+You can also [build it yourself](#build-from-source).
 
 ### Permissions
 
