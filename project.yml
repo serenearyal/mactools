@@ -24,8 +24,8 @@ targetTemplates:
       base:
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
-        MARKETING_VERSION: "0.1.1"
-        CURRENT_PROJECT_VERSION: "5"
+        MARKETING_VERSION: "0.1.2"
+        CURRENT_PROJECT_VERSION: "6"
         SKIP_INSTALL: YES
 
 targets:
@@ -57,8 +57,8 @@ targets:
         PRODUCT_NAME: MacTools
         PRODUCT_BUNDLE_IDENTIFIER: com.serenearyal.mactools
         CODE_SIGN_ENTITLEMENTS: App/MacTools.entitlements
-        MARKETING_VERSION: "0.1.1"
-        CURRENT_PROJECT_VERSION: "5"
+        MARKETING_VERSION: "0.1.2"
+        CURRENT_PROJECT_VERSION: "6"
         COMBINE_HIDPI_IMAGES: YES
     dependencies:
       - package: MacToolsCore
@@ -121,8 +121,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSUIElement: YES
         INFOPLIST_KEY_CFBundleDisplayName: MacTools AX Probe
-        MARKETING_VERSION: "0.1.1"
-        CURRENT_PROJECT_VERSION: "5"
+        MARKETING_VERSION: "0.1.2"
+        CURRENT_PROJECT_VERSION: "6"
         SKIP_INSTALL: YES
 
   mactoolsctl:
