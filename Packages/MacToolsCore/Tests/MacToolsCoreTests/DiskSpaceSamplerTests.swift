@@ -11,7 +11,8 @@ struct DiskSpaceSamplerTests {
     func sampleHasVolumes() {
         let volumes = DiskSpaceSampler.sample()
         #expect(!volumes.isEmpty)
-        let boot = try? #require(volumes.first { $0.isBootVolume })
+        let boot = volumes.first { $0.isBootVolume }
+        #expect(boot != nil)
         #expect(boot?.total ?? 0 > 0)
         #expect(boot?.mountPath == "/")
         // The boot volume sorts first, whatever else is mounted.
