@@ -11,6 +11,14 @@ protocol FanBackend: Sendable {
     func snapshot() async throws(HelperConnectionError) -> FanSnapshot
     func setMode(_ mode: FanMode, forFan index: Int) async throws(HelperConnectionError)
     func restoreAllAuto() async throws(HelperConnectionError)
+    /// Changes whenever the backend opened a new connection, so the store can
+    /// tell a helper that restarted and forgot every mode.
+    var connectionGeneration: Int { get async }
+}
+
+extension FanBackend {
+    /// A backend without a connection never loses what it was told.
+    var connectionGeneration: Int { get async { 0 } }
 }
 
 /// The real one: XPC to the privileged helper.
@@ -37,6 +45,10 @@ struct HelperFanBackend: FanBackend {
         try await connection.restoreAllAuto()
     }
 
+    var connectionGeneration: Int {
+        get async { await connection.generation }
+    }
+
     private func checkVersion() throws(HelperConnectionError) {
         if let reason = HelperGate.shared.blockedReason { throw .refused(reason) }
     }
@@ -47,7 +59,12 @@ struct HelperFanBackend: FanBackend {
 /// The wish for each fan is persisted, because the helper deliberately forgets
 /// it: the fans go back to Auto the moment the last client disconnects, so the
 /// app is the only place that remembers what the user chose. It writes the
-/// modes again at launch and after every reconnect.
+/// modes again at launch, after every reconnect and whenever the helper
+/// reports a mode other than the stored one without a fault to explain it.
+///
+/// A fault the helper reports on a fan it put back to Auto goes the other
+/// way: the store takes Auto for that fan, so every view shows what the fan
+/// does and a broken mode is not sent again for ever.
 @MainActor
 @Observable
 final class FanStore {
@@ -74,8 +91,15 @@ final class FanStore {
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private let persistsModes: Bool
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    /// The interval `pollTask` runs at, nil while it does not run.
+    @ObservationIgnored private var pollCadence: Duration?
     @ObservationIgnored private var demand = SamplingDemand()
     @ObservationIgnored private var hasApplied = false
+    /// The backend connection the stored modes were last checked against.
+    @ObservationIgnored private var knownGeneration: Int?
+    /// The fans of the last snapshot. Kept when the helper goes away, so the
+    /// watch knows whose stored mode to look at.
+    @ObservationIgnored private var knownFans: [Int] = []
     @ObservationIgnored private var pendingSends: [Int: Task<Void, Never>] = [:]
     @ObservationIgnored private let log = AppLog.fans
 
@@ -83,6 +107,13 @@ final class FanStore {
     /// every snapshot, so this is the same cost as one line of the Sensors
     /// tab.
     private static let pollInterval = SamplingPlan.fanInterval
+    /// While nothing shows the fans but a stored mode is not Auto. Only a
+    /// check that the helper still holds the wish, so it can be slow: a
+    /// restarted helper runs the fans on Auto until the next one.
+    private static let watchInterval: Duration = .seconds(10)
+    /// The fans whose stored mode the watch looks at before the helper ever
+    /// answered. No Mac has more.
+    private static let probedFanCount = 4
     private static let sendDelay: Duration = .milliseconds(200)
     /// How long the quit path waits for the helper to confirm Auto.
     private static let terminationWait: DispatchTimeInterval = .seconds(1)
@@ -110,6 +141,7 @@ final class FanStore {
         } else {
             transientModes[index] = mode
         }
+        updatePolling()
     }
 
     // MARK: - Polling
@@ -123,39 +155,70 @@ final class FanStore {
     func setDemand(_ demand: SamplingDemand) {
         guard self.demand != demand else { return }
         self.demand = demand
-        let wanted = SamplingPlan.pollsFans(demand)
-        if wanted, pollTask == nil {
-            // `.utility`: a fan snapshot is an XPC round trip to the helper,
-            // and nothing about it is user-interactive.
-            pollTask = Task.detached(priority: .utility) { [weak self] in
-                while !Task.isCancelled {
+        updatePolling()
+    }
+
+    /// Fast while the fans are on screen, slow while only a stored mode needs
+    /// the helper to keep it, and not at all otherwise, which is the idle
+    /// case of almost every user.
+    private func updatePolling() {
+        let cadence: Duration? = if SamplingPlan.pollsFans(demand) {
+            FanStore.pollInterval
+        } else if holdsWish {
+            FanStore.watchInterval
+        } else {
+            nil
+        }
+        guard cadence != pollCadence else { return }
+        pollTask?.cancel()
+        pollTask = nil
+        pollCadence = cadence
+        guard let cadence else { return }
+        // The watch starts with a sleep: it takes over from a fast poll or a
+        // command that has just read the fans.
+        let readsFirst = cadence == FanStore.pollInterval
+        // `.utility`: a fan snapshot is an XPC round trip to the helper,
+        // and nothing about it is user-interactive.
+        pollTask = Task.detached(priority: .utility) { [weak self] in
+            var reads = readsFirst
+            while !Task.isCancelled {
+                if reads {
                     guard let self else { return }
                     await self.refresh()
                     guard !Task.isCancelled else { return }
-                    try? await Task.sleep(
-                        for: FanStore.pollInterval,
-                        tolerance: SamplingPlan.tolerance(for: FanStore.pollInterval)
-                    )
                 }
+                reads = true
+                try? await Task.sleep(for: cadence, tolerance: SamplingPlan.tolerance(for: cadence))
             }
-        } else if !wanted {
-            pollTask?.cancel()
-            pollTask = nil
         }
+    }
+
+    /// True when a stored mode is not Auto, so the helper has to be told
+    /// again if it restarts.
+    private var holdsWish: Bool {
+        let indices = knownFans.isEmpty ? Array(0..<FanStore.probedFanCount) : knownFans
+        return indices.contains { !storedMode(forFan: $0).isAuto }
     }
 
     func refresh() async {
         pollCount += 1
         do {
             let fresh = try await backend.snapshot()
-            let reconnected = snapshot == nil
+            let generation = await backend.connectionGeneration
+            // A new connection may be a new helper process, which starts with
+            // every fan on Auto.
+            let reconnected = snapshot == nil || generation != knownGeneration
+            knownGeneration = generation
             // Only on a change: a fan that holds 2000 rpm for a minute must
             // not invalidate the views that draw it thirty times.
             if fresh != snapshot { snapshot = fresh }
             if fresh.readError != failure { failure = fresh.readError }
+            let indices = fresh.fans.map(\.index)
+            if !indices.isEmpty, indices != knownFans { knownFans = indices }
+            adoptFaults(of: fresh)
             // The helper forgets every mode when the last client leaves, so a
             // fresh connection is the moment to say what the fans should do.
-            if reconnected || !hasApplied {
+            if reconnected || !hasApplied || drifts(fresh) {
                 await applyStoredModes(to: fresh)
             }
         } catch {
@@ -163,6 +226,9 @@ final class FanStore {
             hasApplied = false
             failure = error.errorDescription
         }
+        // A helper that is not there yet still owes the stored modes, so the
+        // watch starts on a failed read too.
+        updatePolling()
     }
 
     // MARK: - Changing a mode
@@ -180,6 +246,8 @@ final class FanStore {
         }
         pendingSends[index] = send
         await send.value
+        // A later choice replaced this one and is still on its way.
+        if pendingSends[index] == send { pendingSends[index] = nil }
     }
 
     private func send(_ mode: FanMode, forFan index: Int) async {
@@ -248,6 +316,34 @@ final class FanStore {
 
     // MARK: - Re-applying what the user chose
 
+    /// A fan the helper faulted and put back to Auto is Auto here too. The
+    /// fault stays in the snapshot and says why.
+    ///
+    /// A fan with a choice on its way is left alone: the snapshot still
+    /// describes the mode that choice replaces.
+    private func adoptFaults(of snapshot: FanSnapshot) {
+        for fault in snapshot.faults where pendingSends[fault.fanIndex] == nil {
+            guard let fan = snapshot.fans.first(where: { $0.index == fault.fanIndex }),
+                  fan.mode.isAuto,
+                  !storedMode(forFan: fan.index).isAuto
+            else { continue }
+            log.info("fan \(fan.index) faulted, storing Auto: \(fault.reason, privacy: .public)")
+            store(.auto, forFan: fan.index)
+        }
+    }
+
+    /// True when the helper runs a fan on a mode other than the stored one
+    /// and no fault explains it: the helper restarted, or the wish was lost
+    /// in some other way, and has to be sent again.
+    private func drifts(_ snapshot: FanSnapshot) -> Bool {
+        let faulted = Set(snapshot.faults.map(\.fanIndex))
+        return snapshot.fans.contains { fan in
+            pendingSends[fan.index] == nil
+                && !faulted.contains(fan.index)
+                && storedMode(forFan: fan.index) != fan.mode
+        }
+    }
+
     /// Writes the stored mode of every fan that is not already on it.
     ///
     /// One fan that refuses must not cost the others theirs, so the loop runs
@@ -255,7 +351,7 @@ final class FanStore {
     /// every fan took its mode: anything less is retried on the next poll.
     private func applyStoredModes(to snapshot: FanSnapshot) async {
         var failures: [(fan: Int, reason: String)] = []
-        for fan in snapshot.fans {
+        for fan in snapshot.fans where pendingSends[fan.index] == nil {
             let stored = storedMode(forFan: fan.index)
             guard stored != fan.mode else { continue }
             log.info("re-applying \(stored.summary, privacy: .public) to fan \(fan.index)")

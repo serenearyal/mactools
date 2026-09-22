@@ -32,8 +32,10 @@ enum HelperConnectionError: Error, LocalizedError, Equatable, Sendable {
 actor HelperConnection {
     private var connection: NSXPCConnection?
     /// Counts the connections this actor has made, so a handler can tell
-    /// whether it speaks for the current one.
-    private var generation = 0
+    /// whether it speaks for the current one, and so a caller can tell that
+    /// the helper on the other end may be a new process that knows nothing
+    /// of what the last one was told.
+    private(set) var generation = 0
     private let requirement: String
     private let timeout: Duration
 
