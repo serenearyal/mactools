@@ -39,12 +39,15 @@ It samples only what is on screen, slows down on battery and in Low Power Mode, 
 
 ## Install
 
-1. Download the latest `MacTools.dmg` from [Releases](../../releases).
+1. Download the latest `MacTools-<version>.dmg` from [Releases](../../releases).
 2. Drag MacTools to Applications and open it.
 3. Click the fan icon in the menu bar.
 
-The app is signed and notarized by Apple.
 It needs macOS 26 or later on Apple silicon.
+
+**The current release is not notarized yet.**
+macOS will say it cannot verify the app. To open it once: System Settings > Privacy & Security, scroll down to the message about MacTools, click **Open Anyway** and enter your password.
+Notarized releases are coming; until then you can also [build it yourself](#build-from-source).
 
 ### Permissions
 

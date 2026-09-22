@@ -58,6 +58,23 @@ release:
 	@du -sh "$(DERIVED)/Build/Products/Release/MacTools.app" | cut -f1 | xargs echo "size:      "
 	@echo "not notarized: this machine has no Developer ID certificate."
 
+# A disk image with the Release app and an Applications shortcut, plus its
+# SHA-256. Signed with whatever identity the build used: without a Developer
+# ID certificate it is not notarized, and `release` says so above.
+DMG = $(DERIVED)/MacTools-$(VERSION).dmg
+VERSION = $(shell /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$(DERIVED)/Build/Products/Release/MacTools.app/Contents/Info.plist" 2>/dev/null || echo dev)
+dmg: release
+	rm -rf "$(DERIVED)/dmg-root" "$(DMG)"
+	mkdir -p "$(DERIVED)/dmg-root"
+	ditto "$(DERIVED)/Build/Products/Release/MacTools.app" "$(DERIVED)/dmg-root/MacTools.app"
+	ln -s /Applications "$(DERIVED)/dmg-root/Applications"
+	hdiutil create -volname "MacTools" -srcfolder "$(DERIVED)/dmg-root" -ov -format UDZO -quiet "$(DMG)"
+	@if security find-identity -v -p codesigning | grep -q "Developer ID Application"; then \
+		codesign --sign "Developer ID Application" --timestamp "$(DMG)"; \
+	fi
+	shasum -a 256 "$(DMG)" | tee "$(DMG).sha256"
+	@echo "dmg: $(DMG)"
+
 run: install
 	open "$(INSTALLED)"
 
